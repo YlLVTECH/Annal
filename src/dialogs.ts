@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { state } from "./state";
+import { parseViewMode } from "./types";
 import type { CtxItem, NoteVersion } from "./types";
 
 /* ---------- DOM 元素获取 ---------- */
@@ -15,6 +16,19 @@ const commitTextEl = document.querySelector<HTMLParagraphElement>("#commit-text"
 const commitInputEl = document.querySelector<HTMLInputElement>("#commit-input")!;
 const commitOkBtn = document.querySelector<HTMLButtonElement>("#commit-ok")!;
 const commitCancelBtn = document.querySelector<HTMLButtonElement>("#commit-cancel")!;
+
+const settingsOverlayEl = document.querySelector<HTMLDivElement>("#settings-overlay")!;
+const settingThemeEl = document.querySelector<HTMLSelectElement>("#setting-theme")!;
+const settingViewEl = document.querySelector<HTMLSelectElement>("#setting-view")!;
+const settingContentDensityEl = document.querySelector<HTMLSelectElement>("#setting-content-density")!;
+const settingFontSizeEl = document.querySelector<HTMLSelectElement>("#setting-font-size")!;
+const settingAutosaveEl = document.querySelector<HTMLInputElement>("#setting-autosave")!;
+const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setting-autosave-delay")!;
+const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
+const settingsSidebarEl = document.querySelector<HTMLElement>("#settings-sidebar")!;
+const settingsContentEl = document.querySelector<HTMLElement>(".settings-content")!;
+const settingsNavItems = settingsSidebarEl.querySelectorAll<HTMLButtonElement>(".settings-nav-item");
+const settingsSections = settingsContentEl.querySelectorAll<HTMLElement>(".settings-section");
 
 /* ---------- 确认弹层 ---------- */
 let confirmAction: (() => void | Promise<void>) | null = null;
@@ -126,7 +140,12 @@ export function showContextMenu(x: number, y: number, items: CtxItem[]) {
 }
 
 export function isAnyDialogOpen(): boolean {
-  return !confirmOverlayEl.hidden || !commitOverlayEl.hidden || !contextMenuEl.hidden;
+  return (
+    !confirmOverlayEl.hidden ||
+    !commitOverlayEl.hidden ||
+    !contextMenuEl.hidden ||
+    !settingsOverlayEl.hidden
+  );
 }
 
 export function handleDialogEscape(): boolean {
@@ -140,6 +159,10 @@ export function handleDialogEscape(): boolean {
   }
   if (!contextMenuEl.hidden) {
     hideContextMenu();
+    return true;
+  }
+  if (!settingsOverlayEl.hidden) {
+    closeSettings();
     return true;
   }
   return false;
@@ -176,4 +199,63 @@ export function initDialogs() {
   window.addEventListener("blur", hideContextMenu);
   window.addEventListener("resize", hideContextMenu);
   window.addEventListener("scroll", hideContextMenu, true);
+}
+
+/* ---------- 设置弹层 ---------- */
+export function openSettings() {
+  syncSettingsUI();
+  settingsOverlayEl.hidden = false;
+}
+
+export function closeSettings() {
+  settingsOverlayEl.hidden = true;
+}
+
+export function isSettingsOpen(): boolean {
+  return !settingsOverlayEl.hidden;
+}
+
+export function getSettingsElements() {
+  return {
+    overlay: settingsOverlayEl,
+    theme: settingThemeEl,
+    view: settingViewEl,
+    contentDensity: settingContentDensityEl,
+    fontSize: settingFontSizeEl,
+    autosave: settingAutosaveEl,
+    autosaveDelay: settingAutosaveDelayEl,
+    sidebarWidth: settingSidebarWidthEl,
+  };
+}
+
+export function switchSettingsCategory(category: string) {
+  for (const item of settingsNavItems) {
+    const active = item.dataset.category === category;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-current", active ? "true" : "false");
+  }
+  for (const section of settingsSections) {
+    section.hidden = section.dataset.section !== category;
+  }
+}
+
+export function getActiveSettingsCategory(): string {
+  const active = settingsSidebarEl.querySelector<HTMLButtonElement>(".settings-nav-item[aria-current='true']");
+  return active?.dataset.category ?? "appearance";
+}
+
+export function syncSettingsUI() {
+  const els = getSettingsElements();
+  els.theme.value = localStorage.getItem("notebook:theme-mode") || "system";
+  els.view.value = parseViewMode(localStorage.getItem("notebook:view"));
+  const savedDensity = localStorage.getItem("notebook:content-density");
+  els.contentDensity.value = savedDensity === "sparse" || savedDensity === "compact" ? savedDensity : "standard";
+  els.fontSize.value = localStorage.getItem("notebook:font-size") || "15.5";
+  els.autosave.checked = localStorage.getItem("notebook:autosave") !== "0";
+  els.autosaveDelay.value = localStorage.getItem("notebook:autosave-delay") || "500";
+  els.sidebarWidth.value = localStorage.getItem("notebook:sidebar-width") || "260";
+
+  const savedCategory = localStorage.getItem("notebook:settings-category") || "appearance";
+  switchSettingsCategory(savedCategory);
+  return els;
 }

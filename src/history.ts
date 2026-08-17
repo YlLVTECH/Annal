@@ -93,7 +93,9 @@ export async function selectHistoryVersion(seq: number) {
     const isLatest = seq === historyVersions[0]?.seq;
     historyViewMetaEl.textContent = `版本 #${seq}${
       v ? ` · ${fmtTime(v.ts)} · ${fmtSize(v.size)}` : ""
-    }${v?.message ? ` · “${v.message}”` : ""}${isLatest ? " · 最新" : ""}`;
+    }${v?.title ? ` · 名称“${v.title}”` : ""}${
+      v?.message ? ` · “${v.message}”` : ""
+    }${isLatest ? " · 最新" : ""}`;
     historyRestoreBtn.hidden = isLatest;
     historyCompareBtn.hidden = false;
     if (historyCompareOn) {
@@ -171,6 +173,14 @@ function renderHistoryList() {
     metaLine.textContent = rel ? `${fmtSize(v.size)} · ${rel}` : fmtSize(v.size);
 
     li.append(top, time, metaLine);
+    // 该版本对应的笔记名（改名入版本控制后可见）
+    if (v.title) {
+      const name = document.createElement("div");
+      name.className = "hi-title";
+      name.textContent = `名称：${v.title}`;
+      name.title = "该版本时的笔记名";
+      li.appendChild(name);
+    }
     if (v.message) {
       const msg = document.createElement("div");
       msg.className = "hi-msg";
@@ -257,9 +267,13 @@ export async function restoreSelectedVersion() {
   const seq = historySelectedSeq;
   if (!id || !seq) return;
   const meta = state.notes.find((n) => n.id === id);
+  const version = historyVersions.find((v) => v.seq === seq);
+  const nameNote = version?.title
+    ? `，并将笔记名改为“${version.title}”`
+    : "";
   openConfirm({
     title: `恢复版本 #${seq}？`,
-    text: `将把「${meta?.title ?? "笔记"}」的当前内容（含尚未提交的修改）覆盖为该版本的内容。恢复不会自动生成新版本，如需保留可恢复后点击「提交」。`,
+    text: `将把「${meta?.title ?? "笔记"}」的当前内容（含尚未提交的修改）覆盖为该版本的内容${nameNote}。恢复不会自动生成新版本，如需保留可恢复后点击「提交」。`,
     okLabel: "恢复",
     danger: true,
     action: async () => {

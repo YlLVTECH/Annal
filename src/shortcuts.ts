@@ -1,5 +1,5 @@
 import { handleDialogEscape } from "./dialogs";
-import { isComposing, redo, runCommand, setViewMode, undo } from "./editor";
+import { canEditCurrent, isComposing, redo, runCommand, setViewMode, undo } from "./editor";
 import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "./history";
 import { setFocusMode, setSidebarHidden } from "./sidebar";
 import { state } from "./state";
@@ -66,8 +66,27 @@ export function initShortcuts(handlers: ShortcutHandlers) {
       }
     }
 
+    if (mod && e.shiftKey && k === "p") {
+      if (isComposing()) return;
+      e.preventDefault();
+      setViewMode("preview");
+      return;
+    }
+    if (mod && e.shiftKey && k === "e") {
+      if (isComposing()) return;
+      e.preventDefault();
+      setViewMode("split");
+      return;
+    }
+    if (mod && !e.shiftKey && k === "e") {
+      if (isComposing()) return;
+      e.preventDefault();
+      setViewMode("edit");
+      return;
+    }
+
     const editorEl = handlers.getEditorElement();
-    if (document.activeElement !== editorEl) return;
+    if (document.activeElement !== editorEl || !canEditCurrent()) return;
 
     if (mod && !isComposing() && k === "z" && !e.shiftKey) {
       e.preventDefault();
@@ -75,22 +94,16 @@ export function initShortcuts(handlers: ShortcutHandlers) {
     } else if (mod && !isComposing() && (k === "y" || (k === "z" && e.shiftKey))) {
       e.preventDefault();
       redo();
-    } else if (mod && e.shiftKey && k === "p") {
-      e.preventDefault();
-      setViewMode("preview");
-    } else if (mod && e.shiftKey && k === "e") {
-      e.preventDefault();
-      setViewMode("split");
-    } else if (mod && !e.shiftKey && k === "e") {
-      e.preventDefault();
-      setViewMode("edit");
     } else if (mod && k === "b") {
+      if (isComposing()) return;
       e.preventDefault();
       runCommand("bold");
     } else if (mod && k === "i") {
+      if (isComposing()) return;
       e.preventDefault();
       runCommand("italic");
     } else if (mod && k === "k") {
+      if (isComposing()) return;
       e.preventDefault();
       runCommand("link");
     }

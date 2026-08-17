@@ -1,0 +1,321 @@
+import { invoke } from "@tauri-apps/api/core";
+import { openConfirm } from "./dialogs";
+import { renderMarkdown } from "./markdown";
+import { dirOfPath, fmtRelative, fmtSize, fmtTime, state } from "./state";
+import type { NoteMeta, NoteVersion } from "./types";
+
+/* ---------- DOM 元素获取 ---------- */
+const historyOverlayEl = document.querySelector<HTMLDivElement>("#history-overlay")!;
+const historyTitleEl = document.querySelector<HTMLParagraphElement>("#history-title")!;
+const historySubEl = document.querySelector<HTMLParagraphElement>("#history-sub")!;
+const historyCloseBtn = document.querySelector<HTMLButtonElement>("#history-close")!;
+const historyListEl = document.querySelector<HTMLUListElement>("#history-list")!;
+const historyViewMetaEl = document.querySelector<HTMLDivElement>("#history-view-meta")!;
+const historyViewContentEl = document.querySelector<HTMLDivElement>("#history-view-content")!;
+const historyRestoreBtn = document.querySelector<HTMLButtonElement>("#history-restore-btn")!;
+const historyCompareBtn = document.querySelector<HTMLButtonElement>("#history-compare-btn")!;
+const historyCompareBarEl = document.querySelector<HTMLDivElement>("#history-compare-bar")!;
+const historyCompareSrcSel = document.querySelector<HTMLSelectElement>("#history-compare-src")!;
+
+/* ---------- 内部状态 ---------- */
+let historyNoteId: string | null = null;
+let historyVersions: NoteVersion[] = [];
+let historySelectedSeq = 0;
+let historyCompareOn = false;
+let historyCompareSrc = 0;
+
+let onRestoredCallback: ((restored: NoteMeta, isCurrent: boolean) => void) | null = null;
+let onStatusCallback: ((msg: string) => void) | null = null;
+
+function compareSourceLabel(seq: number): string {
+  return seq === 0 ? "最新版本" : `版本 #${seq}`;
+}
+
+/** 逐行差异渲染进预览区（+ 为选中版本新增，− 为仅存在于对比源） */
+async function renderVersionDiffInto(source: string, target: string) {
+  const { diffLines } = await import("diff");
+  const parts = diffLines(source, target);
+  if (parts.length === 1 && !parts[0].added && !parts[0].removed) {
+    historyViewContentEl.innerHTML =
+      '<div class="history-empty">两个版本内容相同，没有差异</div>';
+    return;
+  }
+  const view = document.createElement("div");
+  view.className = "diff-view";
+  for (const part of parts) {
+    const lines = part.value.split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    for (const line of lines) {
+      const row = document.createElement("div");
+      row.className =
+        "diff-line" + (part.added ? " diff-add" : part.removed ? " diff-del" : "");
+      const mark = document.createElement("span");
+      mark.className = "diff-mark";
+      mark.textContent = part.added ? "+" : part.removed ? "−" : "";
+      row.append(mark, document.createTextNode(line === "" ? " " : line));
+      view.appendChild(row);
+    }
+  }
+  historyViewContentEl.innerHTML = "";
+  historyViewContentEl.appendChild(view);
+}
+
+async function renderVersionDiff(id: string, seq: number, selected: string) {
+  const srcSeq = historyCompareSrc === 0 ? historyVersions[0]?.seq ?? 0 : historyCompareSrc;
+  if (!srcSeq) return;
+  historyViewContentEl.innerHTML = '<div class="history-empty">加载中…</div>';
+  try {
+    const source = await invoke<string>("get_note_version", { id, seq: srcSeq });
+    if (historyNoteId !== id || historySelectedSeq !== seq || !historyCompareOn) return;
+    const srcLabel = compareSourceLabel(historyCompareSrc);
+    const v = historyVersions.find((x) => x.seq === seq);
+    historyViewMetaEl.textContent = `对比：${srcLabel} → 版本 #${seq}${v ? ` · ${fmtTime(v.ts)}` : ""}`;
+    await renderVersionDiffInto(source, selected);
+  } catch (err) {
+    if (historyNoteId !== id || historySelectedSeq !== seq || !historyCompareOn) return;
+    historyViewContentEl.innerHTML = `<div class="history-empty">对比失败: ${err}</div>`;
+  }
+}
+
+export async function selectHistoryVersion(seq: number) {
+  if (!historyNoteId) return;
+  historySelectedSeq = seq;
+  for (const li of historyListEl.querySelectorAll<HTMLLIElement>(".history-item")) {
+    li.classList.toggle("active", li.dataset.seq === String(seq));
+  }
+  const v = historyVersions.find((x) => x.seq === seq);
+  const id = historyNoteId;
+  historyViewMetaEl.textContent = "";
+  historyViewContentEl.innerHTML = '<div class="history-empty">加载中…</div>';
+  try {
+    const content = await invoke<string>("get_note_version", { id, seq });
+    if (historyNoteId !== id || historySelectedSeq !== seq) return;
+    const isLatest = seq === historyVersions[0]?.seq;
+    historyViewMetaEl.textContent = `版本 #${seq}${
+      v ? ` · ${fmtTime(v.ts)} · ${fmtSize(v.size)}` : ""
+    }${v?.message ? ` · “${v.message}”` : ""}${isLatest ? " · 最新" : ""}`;
+    historyRestoreBtn.hidden = isLatest;
+    historyCompareBtn.hidden = false;
+    if (historyCompareOn) {
+      await renderVersionDiff(id, seq, content);
+    } else {
+      const baseDir = dirOfPath(state.notes.find((n) => n.id === id)?.path ?? "");
+      historyViewContentEl.innerHTML = content.trim()
+        ? renderMarkdown(content, baseDir)
+        : '<div class="history-empty">（该版本内容为空）</div>';
+    }
+  } catch (err) {
+    if (historyNoteId !== id || historySelectedSeq !== seq) return;
+    historyViewMetaEl.textContent = "";
+    historyViewContentEl.innerHTML = `<div class="history-empty">读取失败: ${err}</div>`;
+    historyRestoreBtn.hidden = true;
+    historyCompareBtn.hidden = true;
+  }
+}
+
+function rebuildCompareSrcOptions() {
+  historyCompareSrcSel.innerHTML = "";
+  const latest = historyVersions[0];
+  if (!latest) return;
+  const optLatest = document.createElement("option");
+  optLatest.value = "0";
+  optLatest.textContent = "最新版本";
+  historyCompareSrcSel.appendChild(optLatest);
+  for (const v of historyVersions) {
+    const opt = document.createElement("option");
+    opt.value = String(v.seq);
+    opt.textContent = `版本 #${v.seq}`;
+    historyCompareSrcSel.appendChild(opt);
+  }
+  historyCompareSrcSel.value = "0";
+  historyCompareSrc = 0;
+}
+
+export async function toggleCompare() {
+  if (!historyNoteId) return;
+  historyCompareOn = !historyCompareOn;
+  historyCompareBarEl.hidden = !historyCompareOn;
+  historyCompareBtn.textContent = historyCompareOn ? "退出对比" : "对比";
+  historyCompareBtn.classList.toggle("active", historyCompareOn);
+  if (historyCompareOn) rebuildCompareSrcOptions();
+  await selectHistoryVersion(historySelectedSeq);
+}
+
+function renderHistoryList() {
+  historyListEl.innerHTML = "";
+  for (const v of historyVersions) {
+    const li = document.createElement("li");
+    li.className = "history-item" + (v.seq === historySelectedSeq ? " active" : "");
+    li.dataset.seq = String(v.seq);
+
+    const top = document.createElement("div");
+    top.className = "hi-top";
+    const seq = document.createElement("span");
+    seq.className = "hi-seq";
+    seq.textContent = `#${v.seq}`;
+    top.appendChild(seq);
+    if (v.seq === historyVersions[0].seq) {
+      const badge = document.createElement("span");
+      badge.className = "hi-badge";
+      badge.textContent = "最新";
+      top.appendChild(badge);
+    }
+
+    const time = document.createElement("div");
+    time.className = "hi-time";
+    time.textContent = fmtTime(v.ts);
+
+    const metaLine = document.createElement("div");
+    metaLine.className = "hi-meta";
+    const rel = fmtRelative(v.ts);
+    metaLine.textContent = rel ? `${fmtSize(v.size)} · ${rel}` : fmtSize(v.size);
+
+    li.append(top, time, metaLine);
+    if (v.message) {
+      const msg = document.createElement("div");
+      msg.className = "hi-msg";
+      msg.textContent = v.message;
+      msg.title = v.message;
+      li.appendChild(msg);
+    }
+    li.addEventListener("click", () => void selectHistoryVersion(v.seq));
+    historyListEl.appendChild(li);
+  }
+  historySubEl.textContent = `共 ${historyVersions.length} 个版本`;
+}
+
+export async function openHistory(id: string, flushSaveFn?: () => Promise<void>) {
+  if (flushSaveFn) {
+    try {
+      await flushSaveFn();
+    } catch {
+      // 保存失败不阻断
+    }
+  }
+  historyNoteId = id;
+  historyVersions = [];
+  historySelectedSeq = 0;
+  const meta = state.notes.find((n) => n.id === id);
+  historyTitleEl.textContent = meta?.title ?? "历史版本";
+  historyTitleEl.title = meta?.path ?? "";
+  historySubEl.textContent = "";
+  historyListEl.innerHTML = '<li class="history-loading">加载中…</li>';
+  historyViewMetaEl.textContent = "";
+  historyViewContentEl.innerHTML = "";
+  historyRestoreBtn.hidden = true;
+  historyCompareBtn.hidden = true;
+  historyCompareBtn.textContent = "对比";
+  historyCompareBtn.classList.remove("active");
+  historyCompareBarEl.hidden = true;
+  historyCompareOn = false;
+  historyCompareSrc = 0;
+  historyOverlayEl.hidden = false;
+
+  try {
+    historyVersions = await invoke<NoteVersion[]>("list_note_versions", { id });
+    if (historyNoteId !== id) return;
+    renderHistoryList();
+    if (historyVersions.length > 0) {
+      await selectHistoryVersion(historyVersions[0].seq);
+    } else {
+      historyViewContentEl.innerHTML =
+        '<div class="history-empty">还没有提交过版本<br>编辑后可点击编辑器右上角「提交」，把当前内容记录为一个新版本</div>';
+    }
+  } catch (err) {
+    if (historyNoteId !== id) return;
+    historyListEl.innerHTML = "";
+    historySubEl.textContent = "";
+    historyViewContentEl.innerHTML = "";
+    if (onStatusCallback) onStatusCallback(`读取历史版本失败: ${err}`);
+  }
+}
+
+export function closeHistory() {
+  historyOverlayEl.hidden = true;
+  historyRestoreBtn.hidden = true;
+  historyCompareBtn.hidden = true;
+  historyCompareBtn.textContent = "对比";
+  historyCompareBtn.classList.remove("active");
+  historyCompareBarEl.hidden = true;
+  historyCompareOn = false;
+  historyCompareSrc = 0;
+  historyNoteId = null;
+  historyVersions = [];
+  historySelectedSeq = 0;
+}
+
+export function isHistoryOpen(): boolean {
+  return !historyOverlayEl.hidden;
+}
+
+export function isHistoryCompareOn(): boolean {
+  return historyCompareOn;
+}
+
+export async function restoreSelectedVersion() {
+  const id = historyNoteId;
+  const seq = historySelectedSeq;
+  if (!id || !seq) return;
+  const meta = state.notes.find((n) => n.id === id);
+  openConfirm({
+    title: `恢复版本 #${seq}？`,
+    text: `将把「${meta?.title ?? "笔记"}」的当前内容（含尚未提交的修改）覆盖为该版本的内容。恢复不会自动生成新版本，如需保留可恢复后点击「提交」。`,
+    okLabel: "恢复",
+    danger: true,
+    action: async () => {
+      try {
+        const restored = await invoke<NoteMeta>("restore_note_version", { id, seq });
+        closeHistory();
+        const isCurrent = state.current?.kind === "note" && state.current.id === id;
+        if (onRestoredCallback) {
+          onRestoredCallback(restored, isCurrent);
+        }
+      } catch (err) {
+        if (onStatusCallback) onStatusCallback(`恢复失败: ${err}`);
+      }
+    },
+  });
+}
+
+function toExternalUrl(href: string): string | null {
+  const h = href.trim();
+  if (!h) return null;
+  if (/^https?:\/\//i.test(h)) {
+    try {
+      const url = new URL(h);
+      return url.host ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
+  if (/^(?:\w+\.)+\w+(?::\d+)?(?:\/\S*)?$/.test(h)) return `https://${h}`;
+  return null;
+}
+
+export function initHistory(
+  onRestored: (restored: NoteMeta, isCurrent: boolean) => void,
+  onStatus: (msg: string) => void,
+) {
+  onRestoredCallback = onRestored;
+  onStatusCallback = onStatus;
+
+  historyCloseBtn.addEventListener("click", closeHistory);
+  historyRestoreBtn.addEventListener("click", () => void restoreSelectedVersion());
+  historyCompareBtn.addEventListener("click", () => void toggleCompare());
+  historyCompareSrcSel.addEventListener("change", () => {
+    historyCompareSrc = Number(historyCompareSrcSel.value) || 0;
+    void selectHistoryVersion(historySelectedSeq);
+  });
+  historyOverlayEl.addEventListener("click", (e) => {
+    if (e.target === historyOverlayEl) closeHistory();
+  });
+  historyViewContentEl.addEventListener("click", (e) => {
+    const a = (e.target as HTMLElement).closest("a");
+    if (!a) return;
+    e.preventDefault();
+    const url = toExternalUrl(a.getAttribute("href") ?? "");
+    if (url) {
+      invoke("open_external", { url }).catch((err) => onStatus(`打开链接失败: ${err}`));
+    }
+  });
+}

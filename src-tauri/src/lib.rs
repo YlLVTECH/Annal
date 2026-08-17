@@ -1,14 +1,17 @@
 //! 极简笔记应用后端。
 //!
 //! 存储方案：每篇笔记一个 Markdown 文件，新建笔记时弹出系统保存对话框，
-//! 由用户选择保存位置与文件名；笔记路径、标题、时间戳等元信息统一存在
+//! 由用户选择保存位置与文件名；笔记路径、名称、时间戳等元信息统一存在
 //! `<app_data>/index.json`。旧版本遗留的笔记文件仍在 `<app_data>/notes/` 下。
 //!
 //! 外部文件：通过文件对话框 / 拖拽 / 系统文件关联打开的 .md 文件，
 //! 由前端直接读写原路径（`open_md_file` / `save_md_file`），不进入笔记索引。
 //!
-//! 文件名与笔记名称保持一致：标题（正文首行或手动重命名）变化时，磁盘上的
-//! 笔记文件自动同步改名（非法字符清理、重名自动加序号，绝不覆盖已有文件）。
+//! 命名规则：**笔记名 = 文件名**，两者在整篇笔记范围内都不重复
+//! （不区分大小写；重名自动加序号，绝不覆盖他人文件）。笔记名不再由正文首行
+//! 自动派生——新建时取所选文件名主干，重命名时同步改名磁盘文件（非法字符清理）。
+//! 外部在资源管理器里改名/移动笔记文件后，应用轮询按内容摘要匹配同一篇笔记，
+//! 同步更新其路径与名称（`reconcile_notes`），并把该次改名记入版本控制。
 //!
 //! 版本控制：参考 git，版本只在用户显式提交时产生（自动保存不记录版本）。
 //! 每次提交在 `<app_data>/versions/<id>/` 下写一个提交记录
@@ -17,11 +20,13 @@
 //! 内容寻址存储：正文按 hash 只落盘一份（`blobs/<hash>`），内容回到历史值
 //! 时直接复用既有对象；超过 4KB 的对象以 zlib 压缩存放（`blobs/<hash>.z`，
 //! 原始大小记在 `blob-sizes.json`），压缩后不缩小的内容退化为未压缩存储。
-//! 内容与最新版本一致时提交不产生新版本。提交说明存放在同目录
-//! `history.json`；旧版把正文直接写在版本文件里的数据仍兼容读取。
+//! 内容与名称都与最新版本一致时提交不产生新版本；提交说明存放在同目录
+//! `history.json`，每个版本对应的笔记名存放在 `titles.json`（改名入版本控制：
+//! 即使正文未变，改名也会生成记录该名称的新版本）。旧版把正文直接写在版本
+//! 文件里的数据仍兼容读取。
 //! 支持把笔记恢复为任意历史版本（`restore_note_version`）：直接以该版本
-//! 内容覆写笔记文件，不产生新版本，恢复后可再提交把结果记录成新版本。
-//! 删除笔记时一并清理其版本历史；外部文件不纳入版本控制。
+//! 内容覆写笔记文件并恢复该版本记录的笔记名，不产生新版本，恢复后可再提交
+//! 把结果记录成新版本。删除笔记时一并清理其版本历史；外部文件不纳入版本控制。
 
 use std::collections::HashMap;
 use std::fs;
@@ -36,12 +41,43 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
+use zip::write::SimpleFileOptions;
+
+fn attachments_dir(data: &Path) -> PathBuf {
+    data.join("attachments")
+}
+
+fn ensure_attachments_dir(data: &Path) -> Result<PathBuf, String> {
+    let dir = attachments_dir(data);
+    fs::create_dir_all(&dir).map_err(err)?;
+    Ok(dir)
+}
+
+fn unique_attachment_path(dir: &Path, file_name: &str) -> PathBuf {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pasted");
+    let ext = Path::new(file_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("png");
+    let mut candidate = dir.join(format!("{stem}.{ext}"));
+    let mut n = 1;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem} ({n}).{ext}"));
+        n += 1;
+    }
+    candidate
+}
 
 /// 笔记元信息（与 index.json 中每条记录对应）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NoteMeta {
     id: String,
+    /// 笔记名。全局唯一（不区分大小写），且始终等于磁盘文件名主干
+    /// （即「笔记名 = 文件名」规则）。不再是正文首行派生而来。
     title: String,
     created_at: u64,
     updated_at: u64,
@@ -49,7 +85,12 @@ struct NoteMeta {
     /// 旧版索引没有该字段，加载时自动回填为 `<app_data>/notes/<id>.md`。
     #[serde(default)]
     path: String,
-    /// 用户手动重命名后为 true：保存正文时不再用首行覆盖标题。
+    /// 最近一次保存正文的 SHA-256 摘要（前 16 位十六进制）。
+    /// 用于在外部改名/移动后，按内容匹配定位同一篇笔记。
+    #[serde(default)]
+    content_hash: String,
+    /// 旧版「手动锁定标题」标记：自 笔记名=文件名 规则起不再参与逻辑，
+    /// 仅保留字段以兼容读取旧索引。
     #[serde(default)]
     title_locked: bool,
 }
@@ -87,6 +128,10 @@ struct NoteVersion {
     /// 提交说明（可空）
     #[serde(default)]
     message: String,
+    /// 该版本所属的笔记名（改名入版本控制后，能查到改名发生在哪个版本）；
+    /// 旧版本没有记录时为 None。
+    #[serde(default)]
+    title: Option<String>,
 }
 
 /// 启动时由系统文件关联传入、等待前端取走的文件路径。
@@ -279,11 +324,34 @@ fn save_commit_message(dir: &Path, seq: u64, message: &str) {
     }
 }
 
+/// 版本目录内「每个版本对应的笔记名」存储文件（`seq -> 名称`）。
+/// 改名入版本控制：即使内容不变，改名也会生成一个记录该名称的新版本。
+fn titles_path(dir: &Path) -> PathBuf {
+    dir.join("titles.json")
+}
+
+fn load_titles(dir: &Path) -> HashMap<u64, String> {
+    fs::read_to_string(titles_path(dir))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// 记录某个版本对应的笔记名（尽力而为：失败不影响版本本身）。
+fn save_title(dir: &Path, seq: u64, title: &str) {
+    let mut map = load_titles(dir);
+    map.insert(seq, title.to_string());
+    if let Ok(json) = serde_json::to_string(&map) {
+        let _ = fs::write(titles_path(dir), json);
+    }
+}
+
 /// 读取版本目录中的全部快照（按 seq 倒序，新的在前）；
 /// 目录不存在视为空历史，无法解析的文件忽略。
 fn list_versions_in(dir: &Path) -> Vec<NoteVersion> {
     let messages = load_messages(dir);
     let blob_sizes = load_blob_sizes(dir);
+    let titles = load_titles(dir);
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
         return out;
@@ -307,6 +375,7 @@ fn list_versions_in(dir: &Path) -> Vec<NoteVersion> {
             size,
             hash,
             message: messages.get(&seq).cloned().unwrap_or_default(),
+            title: titles.get(&seq).cloned(),
         });
     }
     out.sort_by(|a, b| b.seq.cmp(&a.seq));
@@ -335,14 +404,20 @@ fn read_version_in(dir: &Path, seq: u64) -> Result<String, String> {
 }
 
 /// 把内容作为一次提交写入版本历史（目录须已存在）：
-/// - 内容与最新版本一致 → 跳过（没有变化可提交），返回 None；
-/// - 否则追加一个 seq 递增的提交记录并保存提交说明，返回其序号。
+/// - 内容与名称都与最新版本一致 → 跳过（没有变化可提交），返回 None；
+/// - 否则追加一个 seq 递增的提交记录并保存提交说明与名称，返回其序号。
 /// 内容寻址：正文写入 `blobs/<hash>`，已存在则直接复用（如 git 的 blob 对象），
 /// 因此 `A → B → A` 的历史里 A 只占一份存储。提交记录是空文件，元信息都在文件名里。
-fn commit_in(dir: &Path, content: &str, message: &str) -> Result<Option<u64>, String> {
+/// `title` 记录该版本对应笔记名：即使内容未变，只要改名也会生成新版本（改名入版本控制）。
+fn commit_in(dir: &Path, content: &str, message: &str, title: &str) -> Result<Option<u64>, String> {
     let hash = content_hash(content);
     let versions = list_versions_in(dir);
-    if versions.first().map(|v| v.hash.as_str()) == Some(hash.as_str()) {
+    // 内容与名称都未变才算真正无变化（避免改名被去重吞掉）
+    if versions
+        .first()
+        .map(|v| v.hash.as_str() == hash.as_str() && v.title.as_deref() == Some(title))
+        .unwrap_or(false)
+    {
         return Ok(None);
     }
     // 先写内容对象（大文件压缩，失败则本次提交失败，不留下悬空记录）
@@ -350,11 +425,12 @@ fn commit_in(dir: &Path, content: &str, message: &str) -> Result<Option<u64>, St
         fs::create_dir_all(blobs_dir(dir)).map_err(err)?;
         write_blob(dir, &hash, content)?;
     }
-    // 再写提交记录（空指针文件）；最后尽力保存提交说明
+    // 再写提交记录（空指针文件）；最后尽力保存提交说明与笔记名
     let next_seq = versions.iter().map(|v| v.seq).max().unwrap_or(0) + 1;
     let path = dir.join(format!("v{next_seq}-{}-{hash}.md", now_millis()));
     fs::write(&path, "").map_err(err)?;
     save_commit_message(dir, next_seq, message);
+    save_title(dir, next_seq, title);
     Ok(Some(next_seq))
 }
 
@@ -409,9 +485,18 @@ fn sanitize_file_stem(title: &str) -> String {
     stem
 }
 
-/// 计算与标题一致的笔记保存路径：同目录、同名、保留原扩展名；
-/// 目标已存在且不是当前文件时自动追加序号（"标题 (1).md"），绝不覆盖他人文件。
-fn note_path_for_title(current: &Path, title: &str) -> PathBuf {
+/// 给定期望笔记名与目标上下文，计算一个满足「笔记名 = 文件名」且都不重复的
+/// 「(笔记名, 保存路径)」组合：
+/// - 笔记名在全部笔记中唯一（不区分大小写，排除 exclude_id 自身）；
+/// - 路径所在目录内不与其他文件冲突（绝不覆盖他人文件）；
+/// - 笔记名严格等于最终路径的主干（不含扩展名）。
+/// 两者冲突时统一自动追加序号（"名称 (1)"、"名称 (2)"…），绝不打扰用户重来。
+fn resolve_note_target(
+    metas: &[NoteMeta],
+    exclude_id: &str,
+    current: &Path,
+    desired: &str,
+) -> (String, PathBuf) {
     let dir = current
         .parent()
         .filter(|d| !d.as_os_str().is_empty())
@@ -421,36 +506,57 @@ fn note_path_for_title(current: &Path, title: &str) -> PathBuf {
         .and_then(|e| e.to_str())
         .unwrap_or("md")
         .to_ascii_lowercase();
-    // 标题自带扩展名时避免 "标题.md.md"
-    let mut stem = sanitize_file_stem(title);
+    // 标题自带扩展名时避免 "计划.md.md"
+    let mut base = sanitize_file_stem(desired);
     let ext_suffix = format!(".{ext}");
-    if stem.to_ascii_lowercase().ends_with(&ext_suffix) {
-        stem.truncate(stem.len() - ext_suffix.len());
+    if base.to_ascii_lowercase().ends_with(&ext_suffix) {
+        base.truncate(base.len() - ext_suffix.len());
     }
-    let mut candidate = dir.join(format!("{stem}.{ext}"));
-    let mut n = 1u32;
-    while candidate.exists() && !paths_same(&candidate, current) {
-        candidate = dir.join(format!("{stem} ({n}).{ext}"));
+    let same_title =
+        |t: &str| metas.iter().any(|m| m.id != exclude_id && m.title.eq_ignore_ascii_case(t));
+    let mut n = 0u32;
+    loop {
+        let candidate = if n == 0 {
+            base.clone()
+        } else {
+            format!("{base} ({n})")
+        };
+        let candidate_path = dir.join(format!("{candidate}.{ext}"));
+        // 与「当前笔记自己的文件」冲突不算冲突（改回同名时跳过）
+        let disk_conflict = candidate_path.exists() && !paths_same(&candidate_path, current);
+        if !disk_conflict && !same_title(&candidate) {
+            return (candidate, candidate_path);
+        }
         n += 1;
     }
-    candidate
 }
 
-/// 让笔记文件跟随标题重命名（尽力而为，不中断保存流程）：
-/// - 目标与当前路径相同（忽略大小写）→ 不动；
-/// - 当前文件存在 → 重命名到目标（冲突由 `note_path_for_title` 加序号）；
-/// - 当前文件不存在（被外部删除）→ 只更新记录路径，下次保存在新路径重建；
-/// - 重命名失败（文件被占用等）→ 保留原路径，下次保存再试。
-fn sync_note_file_to_title(meta: &mut NoteMeta) {
-    let current = note_file(meta);
-    let target = note_path_for_title(&current, &meta.title);
-    if paths_same(&current, &target) {
-        return;
+/// 用 `resolve_note_target` 计算出的目标同步笔记元信息（尽力而为，不中断流程）：
+/// - 当前文件存在 → 重命名到目标（目标与当前相同则不动；失败保留当前路径）；
+/// - 当前文件不存在（被外部删除）→ 只更新记录路径与名称，下次保存在新路径重建。
+/// 返回 true 表示发生了真实的命名/路径变化。
+fn sync_note_to_resolved(meta: &mut NoteMeta, metas: &[NoteMeta], exclude_id: &str, desired: &str) -> bool {
+    let current_files = note_file(meta);
+    // 计算唯一目标（同时考虑其它笔记名与目录内文件）
+    let (title, target) = resolve_note_target(metas, exclude_id, &current_files, desired);
+    let renamed_title = !title.eq_ignore_ascii_case(&meta.title);
+    let moved_path = !paths_same(&current_files, &target);
+    if current_files.is_file() && moved_path {
+        // 重命名失败（文件被占用等）→ 保持原路径原名称，下次保存再试
+        if fs::rename(&current_files, &target).is_err() {
+            return false;
+        }
     }
-    if current.is_file() && fs::rename(&current, &target).is_err() {
-        return;
-    }
+    meta.title = title;
     meta.path = target.to_string_lossy().into_owned();
+    renamed_title || moved_path
+}
+
+/// 把内容写入笔记文件（写失败则文件保持原状），并同步 content_hash。
+fn write_note_content(meta: &mut NoteMeta, content: &str) -> Result<(), String> {
+    fs::write(note_file(meta), content).map_err(err)?;
+    meta.content_hash = content_hash(content);
+    Ok(())
 }
 
 /// 读取索引文件（不存在的文件视为空索引）。
@@ -490,32 +596,6 @@ fn save_index(app: &tauri::AppHandle, metas: &[NoteMeta]) -> Result<(), String> 
     write_index(&index_path(app)?, metas)
 }
 
-/// 标题截断到 50 字符（超出加省略号），与侧栏显示一致。
-fn truncate_title(t: &str) -> String {
-    if t.chars().count() > 50 {
-        let mut s: String = t.chars().take(50).collect();
-        s.push('…');
-        s
-    } else {
-        t.to_string()
-    }
-}
-
-/// 从正文第一行提取标题；空笔记显示"无标题笔记"。
-fn derive_title(content: &str) -> String {
-    let first_line = content
-        .lines()
-        .map(|l| l.trim().trim_start_matches('#').trim())
-        .find(|l| !l.is_empty());
-
-    let mut title = first_line.unwrap_or("无标题笔记").to_string();
-    if title.chars().count() > 50 {
-        title = title.chars().take(50).collect();
-        title.push('…');
-    }
-    title
-}
-
 /// 列出全部笔记（按更新时间倒序）。
 #[tauri::command]
 async fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteMeta>, String> {
@@ -524,8 +604,9 @@ async fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteMeta>, 
     Ok(metas)
 }
 
-/// 新建一篇笔记：文件保存在用户选择的路径（前端先弹保存对话框）。
-/// 若该路径已有一篇笔记，直接返回已有笔记；若已存在同名文件则保留其内容不覆盖。
+/// 新建一篇笔记：文件保存在用户选择的目录与初始文件名（前端先弹保存对话框）。
+/// 若该路径已是一篇笔记，直接返回已有笔记。
+/// 笔记名 = 文件名主干，整篇笔记范围内唯一（重名自动加序号）；创建后最新版本即记为初始版本。
 #[tauri::command]
 async fn create_note(
     app: tauri::AppHandle,
@@ -546,37 +627,48 @@ async fn create_note(
     }
 
     let now = now_millis();
-    // 初始标题与文件名保持一致：已有内容的文件取正文首行，否则取所选文件名主干
-    let initial_title = if p.exists() {
-        fs::read_to_string(&p)
-            .map(|c| derive_title(&c))
-            .unwrap_or_else(|_| "无标题笔记".to_string())
-    } else {
-        let stem = p
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if stem.is_empty() {
-            "无标题笔记".to_string()
-        } else {
-            truncate_title(&stem)
-        }
-    };
+    // 初始名来自所选文件名主干（不再取正文首行）；全局去重并保证文件名不冲突。
+    let desired = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut meta = NoteMeta {
         id: uuid::Uuid::new_v4().to_string(),
-        title: initial_title,
+        title: String::new(),
         created_at: now,
         updated_at: now,
-        path,
-        title_locked: false,
+        path: path.clone(),
+        content_hash: String::new(),
+        title_locked: true,
+    };
+    // 若所选位置已被一个同名文件占用（可能不是笔记），重名自动加序号绝不覆盖。
+    // 已有内容的文件内容先读出来保留（新笔记不丢弃用户已放好的内容）。
+    let existing = if p.is_file() {
+        fs::read_to_string(&p).ok()
+    } else {
+        None
     };
     if !p.exists() {
         fs::write(&p, "").map_err(err)?;
     }
-    // 让文件名立即与标题一致（新建空文件时标题=文件名主干，通常无需改名）
-    sync_note_file_to_title(&mut meta);
+    let my_id = meta.id.clone();
+    let changed = sync_note_to_resolved(&mut meta, &metas, &my_id, &desired);
+    if let Some(content) = existing {
+        meta.content_hash = content_hash(&content);
+        // 目标路径因去重可能与所选位置不同，把原有内容搬到新文件
+        let _ = fs::write(note_file(&meta), &content);
+        fs::remove_file(&p).ok();
+    } else if changed {
+        // 文件被改名到唯一位置（清空目标）
+        fs::write(note_file(&meta), "").ok();
+    }
     metas.push(meta.clone());
     save_index(&app, &metas)?;
+    // 新建即产生初始版本，便于改名纳入版本控制
+    let dir = versions_dir_of(&data_dir(&app)?, &meta.id);
+    fs::create_dir_all(&dir).ok();
+    let content = fs::read_to_string(note_file(&meta)).unwrap_or_default();
+    let _ = commit_in(&dir, &content, "新建笔记", &meta.title);
     Ok(meta)
 }
 
@@ -600,7 +692,8 @@ async fn get_note(state: tauri::State<'_, AppState>, id: String) -> Result<Note,
     Ok(Note { meta, content })
 }
 
-/// 保存笔记内容，并更新标题与更新时间；文件名自动跟随标题。
+/// 保存笔记内容。标题不再随正文首行变化（笔记名 = 文件名，改名走 `rename_note`）；
+/// 这里只写正文、刷新更新时间与内容摘要。自动保存不记录版本。
 #[tauri::command]
 async fn update_note(
     app: tauri::AppHandle,
@@ -613,22 +706,16 @@ async fn update_note(
         .iter_mut()
         .find(|m| m.id == id)
         .ok_or_else(|| format!("笔记不存在: {id}"))?;
-    if !meta.title_locked {
-        meta.title = derive_title(&content);
-    }
     meta.updated_at = now_millis();
-    // 先写正文（写失败则文件保持原状），再让文件名跟随标题
-    // 注意：自动保存不记录版本，版本只在用户显式提交（commit_note）时产生
-    fs::write(note_file(meta), &content).map_err(err)?;
-    sync_note_file_to_title(meta);
+    // 先写正文（写失败则文件保持原状），再刷新内容摘要；标题保持不变
+    write_note_content(meta, &content)?;
     let meta = meta.clone();
     save_index(&app, &metas)?;
     Ok(meta)
 }
 
-/// 重命名一篇笔记（锁定标题，之后保存正文不再自动派生标题），
-/// 同时把磁盘文件改名为与标题一致的名字（冲突自动加序号）。
-/// 传空标题可解除锁定，恢复按首行自动命名。
+/// 重命名一篇笔记：新名在全部笔记中唯一，磁盘文件同步改名为与名称一致（冲突自动加序号）。
+/// 改名会记录到版本控制（即使正文未变也生成一个新版本，标记录改名的名称）。
 #[tauri::command]
 async fn rename_note(
     app: tauri::AppHandle,
@@ -637,24 +724,33 @@ async fn rename_note(
     title: String,
 ) -> Result<NoteMeta, String> {
     let mut metas = state.index.lock().map_err(|e| e.to_string())?;
-    let meta = metas
-        .iter_mut()
-        .find(|m| m.id == id)
+    let idx = metas
+        .iter()
+        .position(|m| m.id == id)
         .ok_or_else(|| format!("笔记不存在: {id}"))?;
     let trimmed = title.trim();
     if trimmed.is_empty() {
-        // 恢复自动命名：标题与文件名都回到跟随正文首行
-        let content = fs::read_to_string(note_file(meta)).unwrap_or_default();
-        meta.title = derive_title(&content);
-        meta.title_locked = false;
-    } else {
-        meta.title = truncate_title(trimmed);
-        meta.title_locked = true;
+        return Err("笔记名不能为空".to_string());
     }
-    // 让文件名与笔记名称保持一致
-    sync_note_file_to_title(meta);
-    let meta = meta.clone();
+    let old_title = metas[idx].title.clone();
+    // 计算唯一目标名称与路径，并同步（同名则无变化）
+    let connote = metas.clone();
+    let changed = {
+        let meta = &mut metas[idx];
+        sync_note_to_resolved(meta, &connote, &id, trimmed)
+    };
+    if !changed {
+        return Ok(metas[idx].clone());
+    }
+    let new_title = metas[idx].title.clone();
+    metas[idx].updated_at = now_millis();
+    let meta = metas[idx].clone();
     save_index(&app, &metas)?;
+    // 改名入版本控制：即使正文未变也提交一个记录该名称的新版本
+    let content = fs::read_to_string(note_file(&meta)).unwrap_or_default();
+    let dir = versions_dir_of(&data_dir(&app)?, &id);
+    fs::create_dir_all(&dir).map_err(err)?;
+    let _ = commit_in(&dir, &content, &format!("重命名：{old_title} → {new_title}"), &new_title);
     Ok(meta)
 }
 
@@ -683,6 +779,38 @@ async fn delete_note(
     save_index(&app, &metas)
 }
 
+/// 批量删除多篇笔记（仅处理索引中存在的笔记；外部文件由前端自行关闭）。
+#[tauri::command]
+async fn delete_selected_notes(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<usize, String> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut metas = state.index.lock().map_err(|e| e.to_string())?;
+    let mut deleted = 0usize;
+    for id in ids {
+        let target = metas.iter().find(|m| m.id == id).cloned();
+        let Some(target) = target else {
+            continue;
+        };
+        let file = note_file(&target);
+        metas.retain(|m| m.id != id);
+        deleted += 1;
+        if file.exists() {
+            let _ = fs::remove_file(&file);
+        }
+        if let Ok(data) = data_dir(&app) {
+            let versions = versions_dir_of(&data, &id);
+            let _ = fs::remove_dir_all(&versions);
+        }
+    }
+    save_index(&app, &metas)?;
+    Ok(deleted)
+}
+
 /// 列出笔记的全部历史版本（新的在前）；没有历史时返回空数组。
 #[tauri::command]
 async fn list_note_versions(app: tauri::AppHandle, id: String) -> Result<Vec<NoteVersion>, String> {
@@ -691,7 +819,7 @@ async fn list_note_versions(app: tauri::AppHandle, id: String) -> Result<Vec<Not
 }
 
 /// 把笔记当前磁盘内容提交为一个新版本（类似 git commit）：
-/// 内容与最新版本一致时返回 None（没有变化可提交），否则返回新版本信息。
+/// 内容与名称均与最新版本一致时返回 None（没有变化可提交），否则返回新版本信息。
 #[tauri::command]
 async fn commit_note(
     app: tauri::AppHandle,
@@ -710,10 +838,82 @@ async fn commit_note(
         .map_err(|_| "笔记文件不存在，无法提交（继续编辑保存后会自动重建）".to_string())?;
     let dir = versions_dir_of(&data_dir(&app)?, &id);
     fs::create_dir_all(&dir).map_err(err)?;
-    match commit_in(&dir, &content, message.trim())? {
+    match commit_in(&dir, &content, message.trim(), &meta.title)? {
         Some(seq) => Ok(list_versions_in(&dir).into_iter().find(|v| v.seq == seq)),
         None => Ok(None),
     }
+}
+
+/// 批量导出选中条目（笔记 + 外部文件）为 zip 文件。
+/// 仅导出磁盘上真实存在的文件；同名条目在压缩包内自动加序号避免冲突。
+#[tauri::command]
+async fn export_notes(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<String>,
+    paths: Vec<String>,
+    zip_path: String,
+) -> Result<usize, String> {
+    if ids.is_empty() && paths.is_empty() {
+        return Err("未选择要导出的条目".into());
+    }
+    let metas = state.index.lock().map_err(|e| e.to_string())?;
+    let mut writer = zip::ZipWriter::new(fs::File::create(&zip_path).map_err(err)?);
+    let mut exported = 0usize;
+    let mut used_names: HashMap<String, usize> = HashMap::new();
+
+    // 收集 (压缩包内文件名, 磁盘路径)：笔记用标题作文件名，外部文件用文件本名
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    for id in ids {
+        let Some(meta) = metas.iter().find(|m| m.id == id) else {
+            continue;
+        };
+        let file = note_file(meta);
+        if !file.is_file() {
+            continue;
+        }
+        let ext = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e))
+            .unwrap_or_default();
+        entries.push((format!("{}{}", meta.title, ext), file));
+    }
+    for p in paths {
+        let file = PathBuf::from(&p);
+        if !file.is_file() {
+            continue;
+        }
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        entries.push((name, file));
+    }
+
+    for (name, file) in entries {
+        // 同名条目加序号（foo.md → foo (1).md → foo (2).md …）
+        let count = used_names.entry(name.clone()).or_insert(0);
+        let arc_name = if *count == 0 {
+            name.clone()
+        } else {
+            match name.rfind('.') {
+                Some(i) => format!("{} ({}).{}", &name[..i], *count, &name[i + 1..]),
+                None => format!("{} ({})", name, *count),
+            }
+        };
+        *count += 1;
+        let content = fs::read_to_string(&file).map_err(err)?;
+        writer
+            .start_file(arc_name, SimpleFileOptions::default())
+            .map_err(err)?;
+        writer.write_all(content.as_bytes()).map_err(err)?;
+        exported += 1;
+    }
+    writer.finish().map_err(err)?;
+    Ok(exported)
 }
 
 /// 读取笔记某个历史版本的内容。
@@ -735,8 +935,8 @@ fn restore_version_content(dir: &Path, seq: u64, file: &Path) -> Result<String, 
 }
 
 /// 把笔记恢复为指定历史版本（类似 `git checkout <commit> -- <file>`）：
-/// 直接以该版本内容覆写笔记文件并更新元信息（标题跟随规则与普通保存一致），
-/// 不产生新版本；恢复后内容与最新版本不同，可再提交把结果记录成新版本。
+/// 直接以该版本内容覆写笔记文件，并把笔记名设为该版本记录的名称（笔记名 = 文件名），
+/// 文件名随之同步改名（冲突自动加序号）；不产生新版本，恢复后再提交可记录成新版本。
 #[tauri::command]
 async fn restore_note_version(
     app: tauri::AppHandle,
@@ -751,12 +951,18 @@ async fn restore_note_version(
         .ok_or_else(|| format!("笔记不存在: {id}"))?;
     let dir = versions_dir_of(&data_dir(&app)?, &id);
     let content = restore_version_content(&dir, seq, &note_file(&metas[idx]))?;
+    // 该版本记录的名称（旧版本没有名称记录时沿用当前名）
+    let version_title = list_versions_in(&dir)
+        .iter()
+        .find(|v| v.seq == seq)
+        .and_then(|v| v.title.clone())
+        .unwrap_or_else(|| metas[idx].title.clone());
+    let connote = metas.clone();
     let meta = &mut metas[idx];
-    if !meta.title_locked {
-        meta.title = derive_title(&content);
-    }
     meta.updated_at = now_millis();
-    sync_note_file_to_title(meta);
+    meta.content_hash = content_hash(&content);
+    // 名称可能因去重而带序号，但语义上恢复到该版本记录的名称
+    let _ = sync_note_to_resolved(meta, &connote, &id, &version_title);
     let meta = meta.clone();
     save_index(&app, &metas)?;
     Ok(meta)
@@ -871,8 +1077,7 @@ async fn save_md_file(path: String, content: String) -> Result<u64, String> {
 /// - 目标路径必须是 Markdown 文件且所在目录存在；
 /// - 目标已是一篇笔记 → 报错；目标文件已存在且未确认覆盖 → 报错；
 /// - 成功：内容复制到目标路径、登记进索引，返回新笔记元信息（源文件保持不动）。
-/// 标题与文件名跟随全局规则：标题取正文首行，文件名同步改为与标题一致
-/// （重名自动加序号，绝不覆盖他人文件）。
+/// 笔记名 = 目标文件名主干，整篇笔记范围内唯一（重名自动加序号，绝不覆盖他人文件）。
 #[cfg(test)]
 fn save_file_as_note_core(
     index: &Path,
@@ -904,16 +1109,30 @@ fn save_file_as_note_core(
         Err(_) => String::from_utf8_lossy(&fs::read(source).map_err(err)?).into_owned(),
     };
     let now = now_millis();
+    let desired = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut meta = NoteMeta {
         id: uuid::Uuid::new_v4().to_string(),
-        title: derive_title(&content),
+        title: String::new(),
         created_at: now,
         updated_at: now,
         path: target.to_string_lossy().into_owned(),
-        title_locked: false,
+        content_hash: String::new(),
+        title_locked: true,
     };
-    fs::write(note_file(&meta), &content).map_err(err)?;
-    sync_note_file_to_title(&mut meta);
+    // 若覆盖到一个已存在的目标文件，先把它移走/改名成本笔记唯一目标
+    let (title, resolved) = resolve_note_target(&metas, &meta.id, target, &desired);
+    meta.title = title;
+    meta.path = resolved.to_string_lossy().into_owned();
+    if target.exists() {
+        // 用户确认覆盖：直接写到唯一目标路径；若与目标不同则清理原文件
+        if !paths_same(&resolved, target) {
+            fs::remove_file(target).ok();
+        }
+    }
+    write_note_content(&mut meta, &content)?;
     metas.push(meta.clone());
     write_index(index, &metas)?;
     Ok(meta)
@@ -956,16 +1175,27 @@ async fn save_file_as_note(
         Err(_) => String::from_utf8_lossy(&fs::read(source_p).map_err(err)?).into_owned(),
     };
     let now = now_millis();
+    let desired = target_p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut meta = NoteMeta {
         id: uuid::Uuid::new_v4().to_string(),
-        title: derive_title(&content),
+        title: String::new(),
         created_at: now,
         updated_at: now,
         path: target_p.to_string_lossy().into_owned(),
-        title_locked: false,
+        content_hash: String::new(),
+        title_locked: true,
     };
-    fs::write(note_file(&meta), &content).map_err(err)?;
-    sync_note_file_to_title(&mut meta);
+    // 用唯一目标（笔记名=文件名，重名自动加序号）；覆盖目标时清理原文件
+    let (title, resolved) = resolve_note_target(&metas, &meta.id, target_p, &desired);
+    meta.title = title;
+    meta.path = resolved.to_string_lossy().into_owned();
+    if target_p.exists() && !paths_same(&resolved, target_p) {
+        fs::remove_file(target_p).ok();
+    }
+    write_note_content(&mut meta, &content)?;
     metas.push(meta.clone());
     save_index(&app, &metas)?;
     Ok(meta)
@@ -977,10 +1207,135 @@ async fn files_exist(paths: Vec<String>) -> Vec<bool> {
     paths.iter().map(|p| PathBuf::from(p).exists()).collect()
 }
 
+/// 扫描并同步外部文件系统改动（资源管理器改名/移动笔记文件）到软件内。
+/// 对每篇笔记：若其记录路径上的文件已不存在，就在原所在目录里找一个未被其它笔记占用、
+/// 且内容摘要与笔记最近保存一致的 .md/.markdown/.txt 文件，视为同一篇笔记被外部改名/移动，
+/// 于是更新其路径与笔记名（笔记名 = 文件名），并把这次改名记入版本控制。
+/// 返回本次发生变化的笔记元信息（新的在前，按 id 去重保序）。
+#[tauri::command]
+async fn reconcile_notes(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<NoteMeta>, String> {
+    let mut metas = state.index.lock().map_err(|e| e.to_string())?;
+    let mut mutated = metas.clone();
+
+    let mut changed: Vec<NoteMeta> = Vec::new();
+
+    // 先以只读方式定位每篇被外部改名/移动的笔记（需要在不持有可变借用时遍历目录），
+    // 统一记录 (id, new_path, new_title)，再一次性写入 mutated。
+    let mut relocations: Vec<(String, PathBuf, String)> = Vec::new();
+    for m in mutated.iter() {
+        let file = note_file(m);
+        if file.is_file() || m.content_hash.is_empty() {
+            continue;
+        }
+        // 只在同一目录里找：外部改名/移动到同目录最常见，跨目录难以定位，保持安全。
+        let Some(dir) = file.parent() else {
+            continue;
+        };
+        let dir = dir.to_path_buf();
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        // 收集该目录里未被任何笔记占用的候选 md 文件
+        let mut candidates = Vec::new();
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_file() || !is_md_path(&p) {
+                continue;
+            }
+            let claimed = mutated
+                .iter()
+                .any(|x| x.id != m.id && paths_same(Path::new(x.path.as_str()), &p));
+            if claimed || paths_same(&p, &file) {
+                continue;
+            }
+            candidates.push(p);
+        }
+        // 内容匹配定位同一篇笔记
+        let found = candidates.into_iter().find(|p| {
+            fs::read_to_string(p)
+                .map(|c| content_hash(&c) == m.content_hash)
+                .unwrap_or(false)
+        });
+        let Some(found) = found else {
+            continue;
+        };
+        let new_stem = found
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let new_title = if new_stem.is_empty() {
+            m.title.clone()
+        } else {
+            new_stem
+        };
+        relocations.push((m.id.clone(), found, new_title));
+    }
+
+    for (id, found, new_title) in relocations {
+        // 外部改出的新名若与其它笔记重名，自动加序号（保持 笔记名=文件名 且都不重复），
+        // 并把磁盘文件同步改名为唯一名（沿用 resolve_note_target 的磁盘冲突保护）。
+        let snapshot = mutated.clone();
+        let (final_title, final_path) = resolve_note_target(&snapshot, &id, &found, &new_title);
+        let mut final_path = final_path;
+        if !paths_same(&final_path, &found) {
+            if fs::rename(&found, &final_path).is_err() {
+                // 改名失败（文件占用等）：本次放弃同步，保持缺失状态待下次
+                continue;
+            }
+        } else {
+            final_path = found;
+        }
+        // 通过 id 定位写入
+        let Some(m) = mutated.iter_mut().find(|x| x.id == id) else {
+            continue;
+        };
+        let old_title = m.title.clone();
+        m.path = final_path.to_string_lossy().into_owned();
+        m.title = final_title;
+        m.updated_at = now_millis();
+        changed.push(m.clone());
+        // 外部改名也记入版本控制
+        let content = fs::read_to_string(&final_path).unwrap_or_default();
+        let dirv = versions_dir_of(&data_dir(&app)?, &m.id);
+        fs::create_dir_all(&dirv).ok();
+        if old_title != m.title {
+            let _ = commit_in(
+                &dirv,
+                &content,
+                &format!("外部重命名：{old_title} → {}", m.title),
+                &m.title,
+            );
+        }
+    }
+
+    if !changed.is_empty() {
+        write_index(&index_path(&app)?, &mutated)?;
+        *metas = mutated;
+    }
+    Ok(changed)
+}
+
 /// 取出启动时由系统文件关联传入、待打开的文件路径（取走即清空）。
 #[tauri::command]
 fn pending_open_files(state: tauri::State<'_, PendingFiles>) -> Vec<String> {
     std::mem::take(&mut *state.0.lock().unwrap())
+}
+
+/// 将粘贴图片写入附件目录，返回实际保存路径（相对或绝对，前端按 Markdown 链接使用）。
+#[tauri::command]
+async fn save_pasted_image(
+    app: tauri::AppHandle,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    let data_dir = data_dir(&app)?;
+    let dir = ensure_attachments_dir(&data_dir)?;
+    let target = unique_attachment_path(&dir, &file_name);
+    fs::write(&target, &data).map_err(err)?;
+    Ok(target.to_string_lossy().into_owned())
 }
 
 /// 前端冲刷完未保存内容后调用，确认可以真正关闭窗口。
@@ -1022,9 +1377,11 @@ pub fn run() {
             update_note,
             rename_note,
             delete_note,
+            delete_selected_notes,
             list_note_versions,
             get_note_version,
             commit_note,
+            export_notes,
             restore_note_version,
             open_external,
             reveal_in_folder,
@@ -1032,7 +1389,9 @@ pub fn run() {
             save_md_file,
             save_file_as_note,
             files_exist,
+            reconcile_notes,
             pending_open_files,
+            save_pasted_image,
             close_ready
         ])
         .on_window_event(|window, event| {
@@ -1081,31 +1440,59 @@ mod tests {
     #[test]
     fn target_path_self_and_conflict() {
         let dir = tmp_dir("target");
-        // 标题与当前文件名一致：目标就是自身
+        // 名称与当前文件名一致、且无其它笔记占用：目标就是自身
         let cur = dir.join("读书笔记.md");
         fs::write(&cur, "# 读书笔记").unwrap();
-        assert_eq!(note_path_for_title(&cur, "读书笔记"), cur);
-        // 标题变化：取同目录新名
-        let t1 = note_path_for_title(&cur, "工作日志");
-        assert_eq!(t1, dir.join("工作日志.md"));
-        // 目标被占用：自动加序号，绝不覆盖
+        let (title, path) = resolve_note_target(&[], "", &cur, "读书笔记");
+        assert_eq!(title, "读书笔记");
+        assert_eq!(path, cur);
+        // 名称变化：取同目录新名
+        let (t, t1) = resolve_note_target(&[], "", &cur, "工作日志");
+        assert_eq!((t.as_str(), t1.clone()), ("工作日志", dir.join("工作日志.md")));
+        // 目标路径被一个非笔记文件占用：自动加序号，绝不覆盖
         fs::write(&t1, "占位").unwrap();
-        let t2 = note_path_for_title(&cur, "工作日志");
+        let (t2a, t2) = resolve_note_target(&[], "", &cur, "工作日志");
+        assert_eq!(t2a, "工作日志 (1)");
         assert_eq!(t2, dir.join("工作日志 (1).md"));
         fs::write(&t2, "占位2").unwrap();
-        let t3 = note_path_for_title(&cur, "工作日志");
+        let (t3a, t3) = resolve_note_target(&[], "", &cur, "工作日志");
+        assert_eq!(t3a, "工作日志 (2)");
         assert_eq!(t3, dir.join("工作日志 (2).md"));
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn target_path_handles_extension_in_title() {
+    fn target_path_dedup_against_other_notes() {
+        let dir = tmp_dir("target-title");
+        let cur = dir.join("旧.md");
+        fs::write(&cur, "").unwrap();
+        // 另一篇笔记已占用 "计划"（即使在不同需求下同目录判断也要全局唯一）
+        let other = NoteMeta {
+            id: "other".into(),
+            title: "计划".into(),
+            created_at: 0,
+            updated_at: 0,
+            path: dir.join("计划.md").to_string_lossy().into_owned(),
+            content_hash: String::new(),
+            title_locked: true,
+        };
+        let metas = vec![other];
+        let (title, path) = resolve_note_target(&metas, "", &cur, "计划");
+        assert_eq!(title, "计划 (1)");
+        assert_eq!(path, dir.join("计划 (1).md"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn target_path_handles_extension_in_name() {
         let dir = tmp_dir("ext");
         let cur = dir.join("旧.md");
         fs::write(&cur, "").unwrap();
-        // 标题自带扩展名时不产生 "计划.md.md"
-        assert_eq!(note_path_for_title(&cur, "计划.md"), dir.join("计划.md"));
-        assert_eq!(note_path_for_title(&cur, "计划.MD"), dir.join("计划.md"));
+        // 名称自带扩展名时不产生 "计划.md.md"
+        let (t1, p1) = resolve_note_target(&[], "", &cur, "计划.md");
+        assert_eq!((t1.as_str(), p1.clone()), ("计划", dir.join("计划.md")));
+        let (t2, p2) = resolve_note_target(&[], "", &cur, "计划.MD");
+        assert_eq!((t2.as_str(), p2.clone()), ("计划", dir.join("计划.md")));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1135,12 +1522,12 @@ mod tests {
     fn version_history_linear_and_dedup() {
         let dir = tmp_dir("versions");
         // 空历史：第一次提交作为基线
-        assert_eq!(commit_in(&dir, "hello", "初稿").unwrap(), Some(1));
-        // 与最新版本内容一致：提交无效
-        assert_eq!(commit_in(&dir, "hello", "再提交").unwrap(), None);
-        assert_eq!(commit_in(&dir, "world", "").unwrap(), Some(2));
+        assert_eq!(commit_in(&dir, "hello", "初稿", "笔记").unwrap(), Some(1));
+        // 与最新版本内容、名称一致：提交无效
+        assert_eq!(commit_in(&dir, "hello", "再提交", "笔记").unwrap(), None);
+        assert_eq!(commit_in(&dir, "world", "", "笔记").unwrap(), Some(2));
         // 内容回到更早的值：仍产生新版本（线性历史记录每次提交时刻）
-        assert_eq!(commit_in(&dir, "hello", "改回 hello").unwrap(), Some(3));
+        assert_eq!(commit_in(&dir, "hello", "改回 hello", "笔记").unwrap(), Some(3));
 
         let list = list_versions_in(&dir);
         assert_eq!(list.len(), 3);
@@ -1161,10 +1548,25 @@ mod tests {
     }
 
     #[test]
+    fn rename_commit_tracks_title_even_with_same_content() {
+        let dir = tmp_dir("renamerv");
+        // 内容相同但名称变化：也会生成新版本并记录名称（改名入版本控制）
+        assert_eq!(commit_in(&dir, "内容", "初稿", "旧名称").unwrap(), Some(1));
+        assert_eq!(commit_in(&dir, "内容", "改名为新", "新名称").unwrap(), Some(2));
+        let list = list_versions_in(&dir);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].title.as_deref(), Some("新名称"));
+        assert_eq!(list[1].title.as_deref(), Some("旧名称"));
+        // 两个版本共享同一 blob
+        assert_eq!(list[0].hash, list[1].hash);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn commit_messages_persist_across_list() {
         let dir = tmp_dir("msg");
-        commit_in(&dir, "a", "第一次提交").unwrap();
-        commit_in(&dir, "b", "  带空白的说明  ").unwrap();
+        commit_in(&dir, "a", "第一次提交", "笔记").unwrap();
+        commit_in(&dir, "b", "  带空白的说明  ", "笔记").unwrap();
 
         // 同一目录重新列出：说明从 history.json 恢复
         let list = list_versions_in(&dir);
@@ -1182,10 +1584,10 @@ mod tests {
     #[test]
     fn commit_reuses_content_blobs() {
         let dir = tmp_dir("blob");
-        commit_in(&dir, "内容A", "初稿").unwrap();
-        commit_in(&dir, "内容B", "").unwrap();
+        commit_in(&dir, "内容A", "初稿", "笔记").unwrap();
+        commit_in(&dir, "内容B", "", "笔记").unwrap();
         // 内容回到历史值：新提交复用既有 blob，不重复落盘
-        commit_in(&dir, "内容A", "改回").unwrap();
+        commit_in(&dir, "内容A", "改回", "笔记").unwrap();
 
         let list = list_versions_in(&dir);
         assert_eq!(list.len(), 3);
@@ -1225,7 +1627,7 @@ mod tests {
         assert_eq!(read_version_in(&dir, 1).unwrap(), "# 旧内容");
 
         // 之后的新提交走 blob，旧版本仍可正常读取
-        commit_in(&dir, "新内容", "").unwrap();
+        commit_in(&dir, "新内容", "", "笔记").unwrap();
         assert_eq!(read_version_in(&dir, 1).unwrap(), "# 旧内容");
         assert_eq!(read_version_in(&dir, 2).unwrap(), "新内容");
         let _ = fs::remove_dir_all(&dir);
@@ -1237,7 +1639,7 @@ mod tests {
         // 大内容（高度可压缩的重复文本）→ 存为 <hash>.z
         let big = "这是一段用于测试压缩的重复文本。".repeat(300);
         assert!(big.len() > BLOB_COMPRESS_MIN_BYTES);
-        commit_in(&dir, &big, "大文件").unwrap();
+        commit_in(&dir, &big, "大文件", "笔记").unwrap();
         let big_hash = content_hash(&big);
         assert!(blob_z_path(&dir, &big_hash).is_file(), "大对象应压缩存储");
         assert!(!blob_path(&dir, &big_hash).exists(), "大对象不应有未压缩副本");
@@ -1253,7 +1655,7 @@ mod tests {
 
         // 小内容：直接未压缩落盘
         let small = "短内容";
-        commit_in(&dir, small, "小文件").unwrap();
+        commit_in(&dir, small, "小文件", "笔记").unwrap();
         let small_hash = content_hash(small);
         assert!(blob_path(&dir, &small_hash).is_file());
         assert!(!blob_z_path(&dir, &small_hash).exists());
@@ -1261,7 +1663,7 @@ mod tests {
         // 阈值边界：恰好达到阈值即走压缩
         let boundary = "a".repeat(BLOB_COMPRESS_MIN_BYTES);
         assert_eq!(boundary.len(), BLOB_COMPRESS_MIN_BYTES);
-        commit_in(&dir, &boundary, "边界").unwrap();
+        commit_in(&dir, &boundary, "边界", "笔记").unwrap();
         assert!(blob_z_path(&dir, &content_hash(&boundary)).is_file());
         assert_eq!(read_version_in(&dir, 3).unwrap(), boundary);
         let _ = fs::remove_dir_all(&dir);
@@ -1271,8 +1673,8 @@ mod tests {
     fn restore_version_overwrites_file_and_keeps_history() {
         let dir = tmp_dir("restore");
         // 提交 A → B 两个版本
-        assert_eq!(commit_in(&dir, "第一版", "初始").unwrap(), Some(1));
-        assert_eq!(commit_in(&dir, "第二版", "更新").unwrap(), Some(2));
+        assert_eq!(commit_in(&dir, "第一版", "初始", "笔记").unwrap(), Some(1));
+        assert_eq!(commit_in(&dir, "第二版", "更新", "笔记").unwrap(), Some(2));
 
         // 笔记文件当前是 B，恢复到 #1 后文件变回 A
         let file = dir.join("note.md");
@@ -1297,7 +1699,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&file).unwrap(), "第一版");
 
         // 恢复后再次提交（内容与 #1 相同）：生成新版本并复用既有 blob
-        assert_eq!(commit_in(&dir, "第一版", "恢复").unwrap(), Some(3));
+        assert_eq!(commit_in(&dir, "第一版", "恢复", "笔记").unwrap(), Some(3));
         assert_eq!(list_versions_in(&dir).len(), 3);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1310,10 +1712,11 @@ mod tests {
         let src = dir.join("外部.txt");
         fs::write(&src, "# 会议记录\n\n- 事项一\n- 事项二").unwrap();
 
-        // 目标不存在：直接另存成功，内容复制、索引登记、源文件不动
-        let target = dir.join("会议记录.md");
+        // 目标不存在：直接另存成功，内容复制、索引登记、源文件不动；
+        // 笔记名 = 目标文件名主干（不再取正文首行）
+        let target = dir.join("我的会议.md");
         let meta = save_file_as_note_core(&index, &src, &target, false).unwrap();
-        assert_eq!(meta.title, "会议记录");
+        assert_eq!(meta.title, "我的会议");
         assert_eq!(fs::read_to_string(&target).unwrap(), "# 会议记录\n\n- 事项一\n- 事项二");
         assert_eq!(fs::read_to_string(&src).unwrap(), "# 会议记录\n\n- 事项一\n- 事项二");
         let metas = read_index(&index).unwrap();
@@ -1329,19 +1732,27 @@ mod tests {
         assert!(save_file_as_note_core(&index, &src, &occupied, false).is_err());
         assert_eq!(fs::read_to_string(&occupied).unwrap(), "旧内容");
 
-        // 确认覆盖后成功：内容被替换并登记；
-        // 标题（会议记录）与文件名（被占用）不一致，文件同步改名为"会议记录 (1).md"
-        // （"会议记录.md" 已被第一篇笔记占用，自动加序号）
+        // 确认覆盖目标文件后成功：内容被替换并登记（笔记名不变 = 目标文件名主干）
         let meta2 = save_file_as_note_core(&index, &src, &occupied, true).unwrap();
-        assert_eq!(meta2.title, "会议记录");
-        assert_eq!(meta2.path, dir.join("会议记录 (1).md").to_string_lossy());
-        assert!(!occupied.exists(), "原目标名应已被同步改名");
+        assert_eq!(meta2.title, "被占用");
+        assert_eq!(meta2.path, occupied.to_string_lossy());
         assert_eq!(
-            fs::read_to_string(&dir.join("会议记录 (1).md")).unwrap(),
+            fs::read_to_string(&occupied).unwrap(),
             "# 会议记录\n\n- 事项一\n- 事项二"
         );
         assert_eq!(read_index(&index).unwrap().len(), 2);
         assert_ne!(meta2.id, meta.id);
+
+        // 目标是一个已存在的普通文件且确认覆盖：按目标文件名建笔记
+        let stray = dir.join("另一个文件.md");
+        fs::write(&stray, "占位").unwrap();
+        let meta3 = save_file_as_note_core(&index, &src, &stray, true).unwrap();
+        assert_eq!(meta3.title, "另一个文件");
+        assert_eq!(meta3.path, stray.to_string_lossy());
+        assert_eq!(
+            fs::read_to_string(&stray).unwrap(),
+            "# 会议记录\n\n- 事项一\n- 事项二"
+        );
 
         // 源文件非法 / 目标目录不存在 / 源不存在：均报错
         let bad_src = dir.join("图片.png");
@@ -1356,18 +1767,17 @@ mod tests {
     }
 
     #[test]
-    fn save_file_as_note_syncs_filename_to_title() {
+    fn save_file_as_note_named_after_target_file() {
         let dir = tmp_dir("saveas-title");
         let index = dir.join("index.json");
         let src = dir.join("外部.md");
-        // 正文首行与所选文件名不一致：另存后文件名跟随标题
+        // 正文首行与所选文件名不一致：笔记名取所选文件名（不再跟随正文首行）
         fs::write(&src, "# 实际标题\n内容").unwrap();
         let target = dir.join("随意起的名字.md");
         let meta = save_file_as_note_core(&index, &src, &target, false).unwrap();
-        assert_eq!(meta.title, "实际标题");
-        assert_eq!(meta.path, dir.join("实际标题.md").to_string_lossy());
-        assert!(!target.exists(), "原目标名应已被同步改名");
-        assert!(dir.join("实际标题.md").exists());
+        assert_eq!(meta.title, "随意起的名字");
+        assert_eq!(meta.path, target.to_string_lossy());
+        assert!(target.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

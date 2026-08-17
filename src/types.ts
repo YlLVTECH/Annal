@@ -6,6 +6,8 @@ export interface NoteMeta {
   updatedAt: number;
   /** 笔记文件在磁盘上的完整路径 */
   path: string;
+  /** 最近保存正文的 SHA-256 摘要（前 16 位十六进制），用于外部改名/移动后的内容匹配 */
+  contentHash?: string;
 }
 
 /** 笔记完整实体（含正文） */
@@ -21,6 +23,8 @@ export interface NoteVersion {
   hash: string;
   /** 提交说明（可空） */
   message: string;
+  /** 该版本所属笔记名（改名入版本控制后可查到改名发生在哪个版本；旧版本为空） */
+  title?: string;
 }
 
 /** 已打开的外部 Markdown 文件 */
@@ -31,6 +35,13 @@ export interface OpenFile {
 }
 
 export type ViewMode = "edit" | "split" | "preview";
+
+export function parseViewMode(value: unknown): ViewMode {
+  if (value === "split" || value === "preview") return value;
+  return "edit";
+}
+
+export type ContentDensity = "standard" | "sparse" | "compact";
 
 /** 当前编辑对象：内部笔记 或 外部文件 */
 export type Source = { kind: "note"; id: string } | { kind: "file"; path: string };

@@ -1,4 +1,5 @@
-import type { NoteMeta, OpenFile, Source, ViewMode } from "./types";
+import { parseViewMode } from "./types";
+import type { ContentDensity, NoteMeta, OpenFile, Source } from "./types";
 
 export const MD_EXT_RE = /\.(md|markdown|txt)$/i;
 export const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i;
@@ -7,6 +8,17 @@ export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const SIDEBAR_MIN_WIDTH = 210;
 export const SIDEBAR_MAX_WIDTH = 460;
 
+export const SPLIT_RATIO_DEFAULT = 0.5;
+export const SPLIT_RATIO_MIN = 0.2;
+export const SPLIT_RATIO_MAX = 0.8;
+
+export const LIST_PAGE_SIZE = 10;
+
+export function readContentDensity(): ContentDensity {
+  const saved = localStorage.getItem("notebook:content-density");
+  return saved === "sparse" || saved === "compact" ? saved : "standard";
+}
+
 /** 全局状态管理单例 */
 export const state = {
   notes: [] as NoteMeta[],
@@ -14,14 +26,22 @@ export const state = {
   current: null as Source | null,
   dirty: false,
   query: "",
-  viewMode: ((localStorage.getItem("notebook:view") as ViewMode) || "edit") as ViewMode,
+  viewMode: parseViewMode(localStorage.getItem("notebook:view")),
+  contentDensity: readContentDensity(),
   focusMode: localStorage.getItem("notebook:focus") === "1",
   sidebarWidth: Number(localStorage.getItem("notebook:sidebar-width")) || SIDEBAR_DEFAULT_WIDTH,
   sidebarHidden: localStorage.getItem("notebook:sidebar") === "hidden",
+  splitRatio: Number(localStorage.getItem("notebook:split-ratio")) || SPLIT_RATIO_DEFAULT,
   /** 已被外部删除的路径（统一小写比较，Windows 路径不区分大小写） */
   missingPaths: new Set<string>(),
-  syncing: false,
   closing: false,
+  listPage: 1,
+  listPageSize:
+    Number(localStorage.getItem("notebook:list-page-size")) || LIST_PAGE_SIZE,
+  /** 多选状态：列表项唯一标识（note id 或文件路径） */
+  selectedIds: [] as string[],
+  /** 范围选择（Shift+点击）的锚点标识 */
+  rangeAnchorId: null as string | null,
 };
 
 /* ---------- 通用格式化与路径辅助函数 ---------- */

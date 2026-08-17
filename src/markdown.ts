@@ -4,7 +4,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
-import { marked, type RendererObject, type Tokens } from "marked";
+import { marked, type RendererObject, type Token, type Tokens, type TokensList } from "marked";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -113,6 +113,49 @@ marked.use({
   renderer,
 });
 
+/* ---------- 源行号标注 ----------
+ * 把源文本按顶层块逐个解析，给每个块的首个标签注入 data-line（0 起始的源行号）。
+ * 分屏滚动同步靠它把编辑区的源行映射到预览区对应块；任何解析异常时回退到
+ * 整体解析（没有 data-line，同步退化为比例模式）。
+ */
+function renderWithLineInfo(src: string): string {
+  let tokens: TokensList;
+  try {
+    tokens = marked.lexer(src);
+  } catch {
+    return marked.parse(src, { async: false }) as string;
+  }
+  let offset = 0;
+  const parts: string[] = [];
+  try {
+    for (const token of tokens as Token[]) {
+      const raw = token.raw ?? "";
+      if (!raw) continue;
+      const line = src.slice(0, offset).split("\n").length - 1;
+      const html = renderBlock(token, tokens);
+      if (html) parts.push(injectLine(html, line));
+      offset += raw.length;
+    }
+  } catch {
+    return marked.parse(src, { async: false }) as string;
+  }
+  // token.raw 拼接与原文对不上时行号不可信，整体回退
+  if (offset !== src.length) return marked.parse(src, { async: false }) as string;
+  return parts.join("");
+}
+
+function renderBlock(token: Token, tokens: TokensList): string {
+  if (token.type === "space" || token.type === "def") return "";
+  const single = [token] as TokensList;
+  single.links = tokens.links;
+  return marked.parser(single) as string;
+}
+
+function injectLine(html: string, line: number): string {
+  // 只注入到首个标签上；raw HTML 块（如 <!-- 注释 --> 开头）注入失败则跳过
+  return html.replace(/^<([a-zA-Z][\w-]*)/, (m) => `${m} data-line="${line}"`);
+}
+
 /** 将 Markdown 渲染为经过消毒的 HTML。baseDir 用于解析相对路径的本地图片。 */
 export function renderMarkdown(src: string, baseDir = ""): string {
   const key = baseDir + "\u0000" + src;
@@ -120,7 +163,7 @@ export function renderMarkdown(src: string, baseDir = ""): string {
   const cached = cacheable ? cacheGet(key) : undefined;
   if (cached !== undefined) return cached;
   renderBaseDir = baseDir;
-  const html = marked.parse(src, { async: false });
+  const html = renderWithLineInfo(src);
   // target 不在 DOMPurify 默认白名单里，需要显式放行（链接点击由 JS 拦截后交给系统浏览器）；
   // asset: 协议用于加载本地图片，需放行到 URL 白名单
   const out = DOMPurify.sanitize(html, {

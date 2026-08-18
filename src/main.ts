@@ -16,20 +16,30 @@ import {
   applyTableTextToEditor,
   canEditCurrent,
   closeEditor,
-  getEditorElement,
-  getPreviewElement,
+  editorHasFocus,
+  getEditorText,
+  getEditorView,
+  getSelectedText,
   initEditor,
   resetSaveStatus,
   runCommand,
   setSaveStatus,
   setStatus,
+  setLineNumbersEnabled,
   setViewMode,
   showEditor,
   updateMissingBadge,
 } from "./editor";
 import { initHistory, openHistory } from "./history";
 import { initShortcuts } from "./shortcuts";
-import { initScrollSync, scheduleResyncSplit } from "./scrollSync";
+import { initScrollSync, scheduleResync } from "./documentPosition";
+import { initVirtualPreview, type PreviewApi } from "./virtualPreview";
+import {
+  applyEdit,
+  loadModel,
+  resetModel,
+  setRenderBaseDir,
+} from "./markdownModel";
 import {
   clearSelection,
   initSidebar,
@@ -69,6 +79,24 @@ const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
 const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
 
 let saveTimer: number | undefined;
+
+/** 虚拟预览实例（在初始化阶段创建，供模块级函数在删除/关闭流程中刷新） */
+let previewApi: PreviewApi | null = null;
+
+/** 打开/切换编辑对象：先加载 Markdown 块模型，再让编辑器显示内容 */
+function openInEditor(title: string, content: string, path: string) {
+  setRenderBaseDir(dirOfPath(path));
+  loadModel(content);
+  showEditor(title, content, path);
+  previewApi?.refresh();
+}
+
+/** 关闭当前编辑对象：清空模型与预览 */
+function closeActiveEditor() {
+  closeEditor();
+  resetModel();
+  previewApi?.refresh();
+}
 
 /* ---------- 主题 ---------- */
 const SUN_SVG =
@@ -118,6 +146,8 @@ function applySettings() {
   state.sidebarWidth = Math.min(Math.max(sidebarWidth, 210), 460);
   const sidebarEl = document.querySelector<HTMLElement>("#sidebar");
   if (sidebarEl) sidebarEl.style.width = `${state.sidebarWidth}px`;
+
+  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
 }
 
 /* ---------- 侧栏与数据刷新 ---------- */
@@ -193,8 +223,7 @@ async function pollFileStates() {
 /* ---------- 保存与自动保存 ---------- */
 async function save() {
   if (!state.dirty || !state.current) return;
-  const editorEl = getEditorElement();
-  const content = editorEl.value;
+  const content = getEditorText();
   setSaveStatus("saving", "保存中…");
 
   try {
@@ -202,7 +231,7 @@ async function save() {
       const id = state.current.id;
       const oldPath = state.notes.find((n) => n.id === id)?.path ?? "";
       const meta = await invoke<NoteMeta>("update_note", { id, content });
-      state.dirty = editorEl.value !== content;
+      state.dirty = getEditorText() !== content;
       state.missingPaths.delete(pathKey(meta.path));
       if (oldPath) state.missingPaths.delete(pathKey(oldPath));
       const i = state.notes.findIndex((n) => n.id === id);
@@ -225,7 +254,7 @@ async function save() {
     } else {
       const path = state.current.path;
       const updatedAt = await invoke<number>("save_md_file", { path, content });
-      state.dirty = editorEl.value !== content;
+      state.dirty = getEditorText() !== content;
       state.missingPaths.delete(pathKey(path));
       updateMissingUI(updateMissingBadge);
       const f = state.openFiles.find((f) => f.path === path);
@@ -318,7 +347,7 @@ async function selectSource(src: Source) {
     deleteNoteBtn.textContent = "删除";
     deleteNoteBtn.title = "删除这篇笔记";
     deleteNoteBtn.classList.remove("close-mode");
-    showEditor(note.title, note.content, note.path);
+    openInEditor(note.title, note.content, note.path);
   } else {
     const f = state.openFiles.find((f) => f.path === src.path)!;
     commitNoteBtn.hidden = true;
@@ -326,7 +355,7 @@ async function selectSource(src: Source) {
     deleteNoteBtn.textContent = "关闭";
     deleteNoteBtn.title = "关闭这个文件（不会删除磁盘上的文件）";
     deleteNoteBtn.classList.add("close-mode");
-    showEditor(f.name, f.content, f.path);
+    openInEditor(f.name, f.content, f.path);
   }
   renderList();
 }
@@ -360,9 +389,9 @@ async function batchDeleteSelected(ids: string[]) {
       try {
         if (noteIds.length > 0) {
           await invoke<number>("delete_selected_notes", { ids: noteIds });
-          if (state.current?.kind === "note" && noteIds.includes(state.current.id)) {
-            closeEditor();
-          }
+if (state.current?.kind === "note" && noteIds.includes(state.current.id)) {
+      closeActiveEditor();
+    }
         }
         for (const p of filePaths) {
           await closeFile(p);
@@ -502,9 +531,9 @@ async function closeFile(path?: string) {
   if (!target) return;
   await flushSave();
   state.openFiles = state.openFiles.filter((f) => f.path !== target);
-  if (state.current?.kind === "file" && state.current.path === target) {
-    closeEditor();
-  }
+if (state.current?.kind === "file" && state.current.path === target) {
+      closeActiveEditor();
+    }
   renderList();
 }
 
@@ -598,7 +627,7 @@ function requestDelete(id?: string) {
       try {
         await invoke("delete_note", { id: target });
         if (state.current?.kind === "note" && state.current.id === target) {
-          closeEditor();
+          closeActiveEditor();
         }
         await refreshList();
       } catch (err) {
@@ -704,12 +733,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   settingsEls.contentDensity.addEventListener("change", () => {
     localStorage.setItem("notebook:content-density", settingsEls.contentDensity.value);
     applySettings();
-    scheduleResyncSplit();
+    previewApi?.markLayoutDirty();
+    scheduleResync();
   });
   settingsEls.fontSize.addEventListener("change", () => {
     localStorage.setItem("notebook:font-size", settingsEls.fontSize.value);
     applySettings();
-    scheduleResyncSplit();
+    previewApi?.markLayoutDirty();
+    scheduleResync();
   });
   settingsEls.autosave.addEventListener("change", () => {
     localStorage.setItem("notebook:autosave", settingsEls.autosave.checked ? "1" : "0");
@@ -723,12 +754,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     localStorage.setItem("notebook:sidebar-width", settingsEls.sidebarWidth.value);
     applySettings();
   });
+  settingsEls.lineNumbers.addEventListener("change", () => {
+    localStorage.setItem("notebook:line-numbers", settingsEls.lineNumbers.checked ? "1" : "0");
+    setLineNumbersEnabled(settingsEls.lineNumbers.checked);
+  });
 
   initTablePopover(applyTableTextToEditor, () => {
-    const editorEl = getEditorElement();
     return {
       hasEditor: canEditCurrent(),
-      text: editorEl.value.slice(editorEl.selectionStart, editorEl.selectionEnd),
+      text: getSelectedText(),
     };
   });
   initHistory(
@@ -741,7 +775,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateMissingUI(updateMissingBadge);
       if (isCurrent) {
         const opened = await invoke<Note>("get_note", { id: restored.id });
-        showEditor(opened.title, opened.content, opened.path);
+        openInEditor(opened.title, opened.content, opened.path);
         setStatus("已恢复版本（如需保留请点击「提交」记录为新版本）");
       } else {
         setStatus(`已将「${restored.title}」恢复到指定版本`);
@@ -749,8 +783,28 @@ window.addEventListener("DOMContentLoaded", async () => {
     },
     (msg) => setStatus(msg),
   );
-  initEditor(() => {
-    scheduleSave();
+  // 预览虚拟化实例：块级渲染，只挂载视口附近的块
+  previewApi = initVirtualPreview(document.querySelector<HTMLElement>("#preview")!);
+
+  // 编辑器初始化（CodeMirror 6）：输入变更驱动块模型的增量更新与虚拟预览刷新
+  initEditor({
+    onEditChange: () => scheduleSave(),
+    onDocChange: (range, text) => {
+      const changed = applyEdit(
+        text,
+        { start: range.start, end: range.end },
+        { newlineChange: range.hasNewlineChange },
+      );
+      previewApi?.refresh(changed);
+      scheduleResync();
+    },
+    setPreviewVisible: (visible) => previewApi?.setVisible(visible),
+    refreshPreview: () => {
+      previewApi?.refresh();
+      scheduleResync();
+    },
+    markPreviewLayoutDirty: () => previewApi?.markLayoutDirty(),
+    previewElement: previewApi.element,
   });
   initSidebar(
     selectSource,
@@ -768,15 +822,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     batchDeleteSelected,
     batchExportSelected,
   );
-  initShortcuts({
-    onNewNote: newNote,
-    onOpenFile: openFileDialog,
-    onFlushSave: flushSave,
-    getEditorElement,
-  });
+  initShortcuts({ onNewNote: newNote, onOpenFile: openFileDialog, onFlushSave: flushSave, editorHasFocus });
 
-  // 7. 编辑器与预览区滚动同步（分屏）：基于源行号锚点双向对齐，见 scrollSync.ts
-  initScrollSync(getEditorElement(), getPreviewElement());
+  // 7. 分屏滚动同步：逻辑位置同步（编辑区源行 ↔ 预览区块），见 documentPosition.ts
+  initScrollSync({ getEditorView, getPreview: () => previewApi! });
 
   // 8. 头部按钮绑定
   commitNoteBtn.addEventListener("click", () => void requestCommit(undefined, flushSave, setStatus));

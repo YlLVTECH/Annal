@@ -1,7 +1,7 @@
 import { handleDialogEscape } from "./dialogs";
 import { canEditCurrent, isComposing, redo, runCommand, setViewMode, undo } from "./editor";
 import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "./history";
-import { setFocusMode, setSidebarHidden } from "./sidebar";
+import { setSidebarHidden } from "./sidebar";
 import { state } from "./state";
 import { closeTablePopover, isTablePopoverOpen } from "./table";
 
@@ -37,14 +37,9 @@ export function initShortcuts(handlers: ShortcutHandlers) {
       setSidebarHidden(!state.sidebarHidden);
       return;
     }
-    if (mod && e.shiftKey && k === "f") {
-      e.preventDefault();
-      if (state.current) setFocusMode(!state.focusMode);
-      return;
-    }
 
     if (e.key === "Escape") {
-      // 分层退出：表格弹层 → 确认/提交/右键弹层 → 历史对比/历史弹层 → 专注模式
+      // 分层退出：表格弹层 → 确认/提交/右键弹层 → 历史对比/历史弹层
       if (isTablePopoverOpen()) {
         closeTablePopover();
         return;
@@ -58,10 +53,6 @@ export function initShortcuts(handlers: ShortcutHandlers) {
           return;
         }
         closeHistory();
-        return;
-      }
-      if (state.focusMode) {
-        setFocusMode(false);
         return;
       }
     }

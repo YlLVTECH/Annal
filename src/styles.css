@@ -746,8 +746,8 @@ body.sidebar-hidden #sidebar-resizer {
   border-color: var(--border);
 }
 
-body.sidebar-hidden:not(.focus-mode) #sidebar-expand,
-body.sidebar-auto-hidden:not(.focus-mode) #sidebar-expand {
+body.sidebar-hidden #sidebar-expand,
+body.sidebar-auto-hidden #sidebar-expand {
   display: inline-flex;
 }
 
@@ -755,60 +755,6 @@ body.sidebar-auto-hidden:not(.focus-mode) #sidebar-expand {
 body.sidebar-hidden #editor-header,
 body.sidebar-auto-hidden #editor-header {
   padding-left: 52px;
-}
-
-/* ---------- 专注模式 ---------- */
-body.focus-mode #sidebar,
-body.focus-mode #sidebar-resizer,
-body.focus-mode #editor-header,
-body.focus-mode #toolbar,
-body.focus-mode #statusbar {
-  display: none !important;
-}
-
-#focus-toggle {
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-#focus-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-#focus-exit {
-  position: fixed;
-  top: calc(var(--titlebar-h) + 8px);
-  right: 12px;
-  z-index: 20;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--bg-pane);
-  color: var(--text-faint);
-  font-size: 12px;
-  cursor: pointer;
-  align-items: center;
-  opacity: 0.6;
-  transition: opacity 0.15s ease, color 0.12s ease;
-}
-
-#focus-exit:hover {
-  opacity: 1;
-  color: var(--text);
-}
-
-/* 隐藏 [hidden] 的 display:none 规则之上，专注模式下强制显示退出按钮 */
-body.focus-mode #focus-exit {
-  display: inline-flex !important;
 }
 
 /* ============ 编辑器面板 ============ */
@@ -1547,6 +1493,22 @@ body.resizing #preview {
 
 .markdown-body a:hover {
   border-bottom-color: var(--link);
+}
+
+.markdown-body a.ext-link {
+  border-bottom-style: dotted;
+}
+.markdown-body a.ext-link::after {
+  content: "";
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-left: 0.15em;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3H3v10h10v-3'/%3E%3Cpath d='M13 3l4 4'/%3E%3Cpath d='M9 3h4v4'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3H3v10h10v-3'/%3E%3Cpath d='M13 3l4 4'/%3E%3Cpath d='M9 3h4v4'/%3E%3C/svg%3E") center/contain no-repeat;
+  opacity: 0.7;
+  vertical-align: 0.05em;
 }
 
 .markdown-body blockquote {
@@ -2952,14 +2914,6 @@ body.resizing #preview {
     left: 8px;
     width: 26px;
     height: 26px;
-  }
-
-  #focus-exit {
-    top: calc(var(--titlebar-h) + 6px);
-    right: 8px;
-    height: 26px;
-    padding: 0 10px;
-    font-size: 11px;
   }
 
   #editor,

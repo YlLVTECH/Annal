@@ -27,3 +27,6 @@ dist-ssr
 # Rust target
 src-tauri/target
 target
+
+# ZCode workspace
+.zcode/

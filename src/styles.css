@@ -1069,6 +1069,13 @@ body.sidebar-auto-hidden #editor-header {
   overflow-y: auto;
 }
 
+/* CodeMirror 挂载容器：滚动交给 .cm-scroller，挂载点本身不滚动 */
+#editor {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 #editor-body.mode-split {
   --split-gap: 5px;
 }
@@ -1088,40 +1095,7 @@ body.sidebar-auto-hidden #editor-header {
   display: none;
 }
 
-/* 分屏空笔记时的编辑区居中提示（与右侧预览空态对齐） */
-.editor-hint {
-  display: none;
-  position: absolute;
-  inset: 0;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-  font-size: 13px;
-  pointer-events: none;
-}
-
-/* 空内容时显示居中提示；一输入即自动隐藏 */
-#editor-body.mode-split #editor:placeholder-shown ~ .editor-hint {
-  display: flex;
-}
-
-/* 分屏下隐藏原生占位符，避免与居中提示重复 */
-#editor-body.mode-split #editor::placeholder {
-  opacity: 0;
-}
-
-/* 窄屏下分屏堆叠时，编辑区/预览区空态更紧凑 */
-@media (max-width: 720px) {
-  .editor-hint {
-    font-size: 12.5px;
-  }
-}
-
-@media (max-width: 480px) {
-  .editor-hint {
-    font-size: 12px;
-  }
-}
+/* 分屏空笔记时的编辑区提示由 CodeMirror 的 placeholder 扩展提供（详见 editor.ts） */
 
 /* 内容密度：宽窗口随容器扩展，分屏时使用更小的面板内边距 */
 :root {
@@ -1154,23 +1128,65 @@ body.sidebar-auto-hidden #editor-header {
   --markdown-heading-space: 1em;
 }
 
-#editor {
-  border: none;
-  outline: none;
-  resize: none;
-  padding: var(--content-pad-y) var(--content-pad-x) var(--content-pad-bottom);
+/* ---------- CodeMirror 6 编辑器 ---------- */
+/* 主题跟随全局 CSS 变量，明暗切换/字号/密度设置自动生效 */
+#editor .cm-editor {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
   font-size: var(--editor-font-size, 15.5px);
   line-height: var(--editor-line-height);
-  font-family: inherit;
-  color: var(--text);
-  background: transparent;
-  caret-color: var(--accent);
-  tab-size: 2;
   transition: color 0.18s ease;
 }
 
-#editor::placeholder {
+#editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+#editor .cm-scroller {
+  font-family: inherit;
+  overflow: auto;
+  line-height: var(--editor-line-height);
+}
+
+#editor .cm-content {
+  padding: var(--content-pad-y) var(--content-pad-x) var(--content-pad-bottom);
+  caret-color: var(--accent);
+  font-size: var(--editor-font-size, 15.5px);
+  line-height: var(--editor-line-height);
+  tab-size: 2;
+}
+
+/* 占位符（空文档提示） */
+#editor .cm-editor .cm-placeholder {
   color: var(--text-faint);
+}
+
+/* 行号槽 */
+#editor .cm-editor .cm-gutters {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  padding-right: 2px;
+}
+
+#editor .cm-editor .cm-activeLineGutter {
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
+
+/* 光标所在行 */
+#editor .cm-editor .cm-activeLine {
+  background: var(--bg-active);
+}
+
+/* 选区（drawSelection 绘制，覆盖为应用色） */
+#editor .cm-editor .cm-selectionBackground,
+#editor .cm-editor .cm-selectionLayer .cm-selectionBackground {
+  background: var(--bg-selection) !important;
 }
 
 #preview {
@@ -1181,7 +1197,7 @@ body.sidebar-auto-hidden #editor-header {
   transition: color 0.18s ease;
 }
 
-#editor-body.mode-split #editor,
+#editor-body.mode-split #editor .cm-content,
 #editor-body.mode-split #preview {
   padding-left: clamp(14px, 2.8vw, 42px);
   padding-right: clamp(14px, 2.8vw, 42px);
@@ -1222,7 +1238,7 @@ body.resizing #preview {
     border-bottom: 1px solid var(--border-soft);
   }
 
-  #editor-body.mode-split #editor,
+  #editor-body.mode-split #editor .cm-content,
   #editor-body.mode-split #preview {
     padding-left: 16px;
     padding-right: 16px;
@@ -1254,7 +1270,7 @@ body.resizing #preview {
 
 /* 极窄屏：继续收紧编辑/预览区内边距 */
 @media (max-width: 480px) {
-  #editor {
+  #editor .cm-content {
     padding-left: 12px;
     padding-right: 12px;
     padding-top: 18px;
@@ -3053,4 +3069,33 @@ body.resizing #preview {
   #preview {
     padding-bottom: 60px;
   }
+}
+
+/* ============ 虚拟化预览（块级） ============ */
+/* 撑层：占位总高度，块在其内部绝对定位（内容坐标 0 即第一个块顶边） */
+#preview .pv-spacer {
+  position: relative;
+  width: 100%;
+}
+
+/* 块级渲染：display:flow-root 阻止子元素 margin 塌陷，
+   使 offsetHeight 精确包含块内间距（布局高度即真实高度） */
+#preview .pv-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flow-root;
+  box-sizing: border-box;
+  word-break: break-word;
+}
+
+/* 文档首个块不额外产生顶距（与旧整篇渲染一致） */
+#preview .pv-block:first-child :first-child {
+  margin-top: 0;
+}
+
+/* 含图片且尚无宽高比信息的块：为图片预留占位高度，避免加载时跳跃 */
+#preview .pv-block.img-placeholder img {
+  min-height: 140px;
+  object-fit: contain;
 }

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openConfirm } from "./dialogs";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdownWhole } from "./markdownModel";
 import { dirOfPath, fmtRelative, fmtSize, fmtTime, state } from "./state";
 import type { NoteMeta, NoteVersion } from "./types";
 
@@ -103,7 +103,7 @@ export async function selectHistoryVersion(seq: number) {
     } else {
       const baseDir = dirOfPath(state.notes.find((n) => n.id === id)?.path ?? "");
       historyViewContentEl.innerHTML = content.trim()
-        ? renderMarkdown(content, baseDir)
+        ? renderMarkdownWhole(content, baseDir)
         : '<div class="history-empty">（该版本内容为空）</div>';
     }
   } catch (err) {

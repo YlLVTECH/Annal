@@ -1429,8 +1429,10 @@ function fallbackBlocks(src) {
 }
 var nextBlockId = 1;
 var blocks = [];
+var documentLineCount = 1;
 var docLinks = {};
 function fullParse(text) {
+  documentLineCount = countNewlines(text) + 1;
   let tokens = [];
   try {
     tokens = f.lexer(text);
@@ -1479,6 +1481,7 @@ function loadModel(text) {
   return blocks;
 }
 function applyEdit(text, range, opts) {
+  documentLineCount = countNewlines(text) + 1;
   const changed = /* @__PURE__ */ new Set();
   if (blocks.length === 0) {
     fullParse(text);
@@ -1662,17 +1665,22 @@ function renderMarkdownWhole(src, baseDir = "") {
 function getBlocks() {
   return blocks;
 }
+function getDocumentLineCount() {
+  return documentLineCount;
+}
 function isModelEmpty() {
   return blocks.length === 0;
 }
 function resetModel() {
   blocks = [];
+  documentLineCount = 1;
   docLinks = {};
 }
 export {
   applyEdit,
   estimateHeight,
   getBlocks,
+  getDocumentLineCount,
   getImgAspect,
   highlightBlock,
   isModelEmpty,

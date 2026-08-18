@@ -25,6 +25,7 @@ const settingFontSizeEl = document.querySelector<HTMLSelectElement>("#setting-fo
 const settingAutosaveEl = document.querySelector<HTMLInputElement>("#setting-autosave")!;
 const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setting-autosave-delay")!;
 const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
+const settingLineNumbersEl = document.querySelector<HTMLInputElement>("#setting-line-numbers")!;
 const settingsSidebarEl = document.querySelector<HTMLElement>("#settings-sidebar")!;
 const settingsContentEl = document.querySelector<HTMLElement>(".settings-content")!;
 const settingsNavItems = settingsSidebarEl.querySelectorAll<HTMLButtonElement>(".settings-nav-item");
@@ -225,6 +226,7 @@ export function getSettingsElements() {
     autosave: settingAutosaveEl,
     autosaveDelay: settingAutosaveDelayEl,
     sidebarWidth: settingSidebarWidthEl,
+    lineNumbers: settingLineNumbersEl,
   };
 }
 
@@ -254,6 +256,7 @@ export function syncSettingsUI() {
   els.autosave.checked = localStorage.getItem("notebook:autosave") !== "0";
   els.autosaveDelay.value = localStorage.getItem("notebook:autosave-delay") || "500";
   els.sidebarWidth.value = localStorage.getItem("notebook:sidebar-width") || "260";
+  els.lineNumbers.checked = localStorage.getItem("notebook:line-numbers") !== "0";
 
   const savedCategory = localStorage.getItem("notebook:settings-category") || "appearance";
   switchSettingsCategory(savedCategory);

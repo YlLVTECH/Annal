@@ -7,6 +7,7 @@ import {
   SIDEBAR_MIN_WIDTH,
   state,
 } from "./state";
+import { t } from "./i18n";
 import type { NoteMeta, Source } from "./types";
 
 /* ---------- DOM 元素获取 ---------- */
@@ -83,11 +84,11 @@ export function initSidebarResizer() {
 
 /* ---------- 列表渲染与行内重命名 ---------- */
 
-function addGroupHeader(frag: DocumentFragment, text: string) {
+function addGroupHeader(frag: DocumentFragment, i18nKey: string) {
   const li = document.createElement("li");
   li.className = "list-group-header";
   const span = document.createElement("span");
-  span.textContent = text;
+  span.textContent = t(i18nKey);
   li.appendChild(span);
   frag.appendChild(li);
 }
@@ -102,8 +103,8 @@ export function updateMissingUI(updateBadgeFn?: (gone: boolean, isFile: boolean)
     const time = li.querySelector<HTMLDivElement>(".note-time");
     if (!time) continue;
     if (gone) {
-      time.textContent = "已从磁盘删除";
-      time.title = "文件已被外部删除，继续输入会自动重新创建";
+      time.textContent = t("sidebar.deleted");
+      time.title = t("editor.missing.deleted");
     } else if (fp) {
       time.textContent = fp;
       time.title = fp;
@@ -212,7 +213,7 @@ export function renderPaginationControls(totalNotes: number) {
   state.listPage = currentPage;
 
   paginationControls.hidden = totalPages <= 1;
-  pageInfo.textContent = `第 ${currentPage}/${totalPages} 页`;
+  pageInfo.textContent = t("sidebar.page.info", { current: String(currentPage), total: String(totalPages) });
   pagePrevBtn.disabled = currentPage <= 1;
   pageNextBtn.disabled = currentPage >= totalPages;
 
@@ -232,7 +233,7 @@ export function updateListAfterSave(meta: NoteMeta) {
   const titleEl = li.querySelector<HTMLDivElement>(".note-title");
   if (titleEl) titleEl.textContent = meta.title;
   for (const el of noteListEl.children) {
-    if (el.classList.contains("list-group-header") && el.textContent === "笔记") {
+    if (el.classList.contains("list-group-header") && el.textContent === t("sidebar.group.notes")) {
       if (li.previousElementSibling !== el) noteListEl.insertBefore(li, el.nextSibling);
       break;
     }
@@ -253,16 +254,16 @@ export function renderList() {
 
   emptyHintEl.hidden = filtered.length > 0 || filesShown.length > 0;
   const [hintMain, hintSub] = emptyHintEl.querySelectorAll("p");
-  hintMain.textContent = state.notes.length > 0 ? "没有匹配的笔记" : "还没有笔记";
+  hintMain.textContent = state.notes.length > 0 ? t("sidebar.noMatch") : t("sidebar.empty.title");
   hintSub.textContent =
     state.notes.length > 0
-      ? "换个关键词试试"
+      ? ""
       : state.openFiles.length > 0
-        ? "点击「＋」新建一篇"
-        : "点击「＋」新建，或点「打开文件」载入 Markdown 文件";
+        ? t("sidebar.empty.sub")
+        : t("sidebar.empty.subWithOpen");
 
   if (filesShown.length > 0) {
-    addGroupHeader(frag, "外部文件");
+    addGroupHeader(frag, "sidebar.group.externalFiles");
     for (const f of filesShown) {
       const li = document.createElement("li");
       li.className =
@@ -298,7 +299,7 @@ export function renderList() {
   }
 
   if (filtered.length > 0) {
-    addGroupHeader(frag, "笔记");
+    addGroupHeader(frag, "sidebar.group.notes");
     const start = (state.listPage - 1) * state.listPageSize;
     const pageNotes = filtered.slice(start, start + state.listPageSize);
     for (const n of pageNotes) {
@@ -379,7 +380,7 @@ export function startRename(id: string) {
         }
         if (onRenameSuccessCallback) onRenameSuccessCallback(id, updated);
       } catch (err) {
-        if (onStatusCallback) onStatusCallback(`重命名失败: ${err}`);
+        if (onStatusCallback) onStatusCallback(t("sidebar.renameFail", { error: String(err) }));
         renderList();
       }
     })();

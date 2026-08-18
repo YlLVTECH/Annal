@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>笔记本</title>
+    <link rel="icon" href="/src-tauri/icons/icon-transparent.ico" />
+    <title data-i18n="app.title">笔记本</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
@@ -13,35 +14,34 @@
       <!-- 自定义标题栏（无系统边框：整条可拖拽，双击最大化） -->
       <header id="titlebar" data-tauri-drag-region>
         <div class="titlebar-left">
-          <svg class="titlebar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg>
-          <span class="titlebar-title">笔记本</span>
+          <span class="titlebar-title" data-i18n="app.title">笔记本</span>
         </div>
         <div class="titlebar-actions">
-          <button id="open-file-btn" class="titlebar-btn" title="打开 Markdown 文件 (Ctrl+O)" aria-label="打开文件">
+          <button id="open-file-btn" class="titlebar-btn" data-i18n-title="titlebar.openFile" title="打开 Markdown 文件 (Ctrl+O)" aria-label="打开文件">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
           </button>
-          <button id="sidebar-collapse" class="titlebar-btn" title="收起侧栏 (Ctrl+\)" aria-label="收起侧栏">
+          <button id="sidebar-collapse" class="titlebar-btn" data-i18n-title="titlebar.collapseSidebar" title="收起侧栏 (Ctrl+\)" aria-label="收起侧栏">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><polyline points="14 9 11 12 14 15"/></svg>
           </button>
-          <button id="theme-toggle" class="titlebar-btn" title="切换明暗主题" aria-label="切换主题">
+          <button id="theme-toggle" class="titlebar-btn" data-i18n-title="titlebar.toggleTheme" title="切换明暗主题" aria-label="切换主题">
             <span class="titlebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-5.4-5.4c0-1.81.9-3.42 2.26-4.4A9 9 0 0 0 12 3z"/><line x1="15" y1="3" x2="15" y2="6"/><line x1="19" y1="7" x2="17" y2="9"/><line x1="21" y1="12" x2="18" y2="12"/></svg></span>
           </button>
-          <button id="settings-toggle" class="titlebar-btn" title="设置" aria-label="设置">
-            <span class="titlebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+          <button id="settings-toggle" class="titlebar-btn" data-i18n-title="titlebar.settings" title="设置" aria-label="设置">
+            <span class="titlebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           </button>
-          <button id="new-note-btn" class="titlebar-btn" title="新建笔记 (Ctrl+N)" aria-label="新建笔记">
+          <button id="new-note-btn" class="titlebar-btn" data-i18n-title="titlebar.newNote" title="新建笔记 (Ctrl+N)" aria-label="新建笔记">
             <span class="titlebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></span>
           </button>
         </div>
         <div class="titlebar-controls">
-          <button id="win-min" class="win-btn" title="最小化" aria-label="最小化">
+          <button id="win-min" class="win-btn" data-i18n-title="titlebar.minimize" title="最小化" aria-label="最小化">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
           </button>
-          <button id="win-max" class="win-btn" title="最大化" aria-label="最大化">
+          <button id="win-max" class="win-btn" data-i18n-title="titlebar.maximize" title="最大化" aria-label="最大化">
             <svg class="icon-max" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><rect x="5" y="5" width="14" height="14"/></svg>
             <svg class="icon-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><rect x="5" y="8" width="11" height="11"/><path d="M8 8V5h11v11h-3"/></svg>
           </button>
-          <button id="win-close" class="win-btn win-close" title="关闭" aria-label="关闭">
+          <button id="win-close" class="win-btn win-close" data-i18n-title="titlebar.close" title="关闭" aria-label="关闭">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
@@ -68,25 +68,25 @@
               <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5" />
               <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
-            <input id="search-input" type="search" placeholder="搜索笔记…" spellcheck="false" />
+            <input id="search-input" type="search" data-i18n-placeholder="sidebar.search.placeholder" placeholder="搜索笔记…" spellcheck="false" />
           </div>
         </div>
         <ul id="note-list"></ul>
         <div id="pagination-controls" class="pagination-controls" hidden>
-          <button id="page-prev" class="page-btn" title="上一页" disabled>‹</button>
-          <span id="page-info" class="page-info">第 1/1 页</span>
-          <select id="page-size" class="page-size" title="每页显示数量">
-            <option value="5">5 条/页</option>
-            <option value="10">10 条/页</option>
-            <option value="20">20 条/页</option>
-            <option value="50">50 条/页</option>
+          <button id="page-prev" class="page-btn" data-i18n-title="sidebar.page.prev" title="上一页" disabled>‹</button>
+          <span id="page-info" class="page-info" data-i18n="sidebar.page.info" data-i18n-args='{"current":"1","total":"1"}'>第 1/1 页</span>
+          <select id="page-size" class="page-size" data-i18n-title="sidebar.page.size" title="每页显示数量">
+            <option value="5" data-i18n="sidebar.page.size5">5 条/页</option>
+            <option value="10" data-i18n="sidebar.page.size10">10 条/页</option>
+            <option value="20" data-i18n="sidebar.page.size20">20 条/页</option>
+            <option value="50" data-i18n="sidebar.page.size50">50 条/页</option>
           </select>
-          <button id="page-next" class="page-btn" title="下一页" disabled>›</button>
+          <button id="page-next" class="page-btn" data-i18n-title="sidebar.page.next" title="下一页" disabled>›</button>
         </div>
         <div id="empty-hint" hidden>
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
-          <p>还没有笔记</p>
-          <p>点击「＋」新建一篇</p>
+          <p data-i18n="sidebar.empty.title">还没有笔记</p>
+          <p data-i18n="sidebar.empty.sub">点击「＋」新建一篇</p>
         </div>
       </aside>
 
@@ -95,16 +95,16 @@
 
       <!-- 右侧：编辑器 -->
       <main id="editor-pane">
-        <button id="sidebar-expand" title="展开侧栏 (Ctrl+\)" aria-label="展开侧栏">
+        <button id="sidebar-expand" data-i18n-title="titlebar.expandSidebar" title="展开侧栏 (Ctrl+\)" aria-label="展开侧栏">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
         </button>
         <div id="editor-header" hidden>
           <span id="editor-title"></span>
-          <span id="editor-missing" hidden>文件已删除</span>
+          <span id="editor-missing" hidden data-i18n="editor.header.missing">文件已删除</span>
           <span id="saved-status"></span>
-          <button id="commit-note-btn" title="把当前内容提交为一个新版本">提交</button>
-          <button id="save-as-note-btn" title="把当前外部文件复制另存为一篇笔记" hidden>存为笔记</button>
-          <button id="delete-note-btn" title="删除这篇笔记">删除</button>
+          <button id="commit-note-btn" data-i18n="editor.header.commit" data-i18n-title="editor.header.commit" title="把当前内容提交为一个新版本">提交</button>
+          <button id="save-as-note-btn" data-i18n="editor.header.saveAsNote" data-i18n-title="editor.header.saveAsNote" title="把当前外部文件复制另存为一篇笔记" hidden>存为笔记</button>
+          <button id="delete-note-btn" data-i18n="editor.header.delete" data-i18n-title="editor.header.delete" title="删除这篇笔记">删除</button>
         </div>
 
         <!-- 工具栏：Markdown 排版 + 视图切换 -->
@@ -161,30 +161,30 @@
           </div>
           <div class="toolbar-spacer"></div>
           <div class="toolbar-group" id="view-toggle" title="视图模式">
-            <button class="view-btn active" data-mode="edit" title="编辑 (Ctrl+E)">编辑</button>
-            <button class="view-btn" data-mode="split" title="分屏 (Ctrl+Shift+E)">分屏</button>
-            <button class="view-btn" data-mode="preview" title="预览 (Ctrl+Shift+P)">预览</button>
+            <button class="view-btn active" data-mode="edit" data-i18n="toolbar.view.edit" data-i18n-title="toolbar.view.edit" title="编辑 (Ctrl+E)">编辑</button>
+            <button class="view-btn" data-mode="split" data-i18n="toolbar.view.split" data-i18n-title="toolbar.view.split" title="分屏 (Ctrl+Shift+E)">分屏</button>
+            <button class="view-btn" data-mode="preview" data-i18n="toolbar.view.preview" data-i18n-title="toolbar.view.preview" title="预览 (Ctrl+Shift+P)">预览</button>
           </div>
         </div>
 
         <!-- 智能表格插入弹层（锚定在表格按钮下方） -->
         <div id="table-popover" hidden role="dialog" aria-label="插入表格">
           <div id="tp-smart" hidden>
-            <div class="tp-smart-title">识别到选区数据</div>
+            <div class="tp-smart-title" data-i18n="table.smartTitle">识别到选区数据</div>
             <div class="tp-smart-desc" id="tp-smart-desc"></div>
-            <button class="tp-smart-btn" id="tp-smart-apply">转换为表格</button>
+            <button class="tp-smart-btn" id="tp-smart-apply" data-i18n="table.smartApply">转换为表格</button>
           </div>
           <div class="tp-grid" id="tp-grid" role="grid" tabindex="0" aria-label="选择表格行列数，方向键调整，回车插入"></div>
           <div class="tp-size" id="tp-size">3 行 × 4 列</div>
           <div class="tp-footer">
             <label class="tp-check" title="第一行作为表头（加粗）">
               <input type="checkbox" id="tp-header" checked />
-              <span>首行为表头</span>
+              <span data-i18n="table.headerCheckbox">首行为表头</span>
             </label>
             <div class="tp-align" role="group" aria-label="列对齐方式">
-              <button type="button" class="tp-align-btn active" data-align="left" title="左对齐">左</button>
-              <button type="button" class="tp-align-btn" data-align="center" title="居中">中</button>
-              <button type="button" class="tp-align-btn" data-align="right" title="右对齐">右</button>
+              <button type="button" class="tp-align-btn active" data-align="left" data-i18n="table.alignLeft" title="左对齐">左</button>
+              <button type="button" class="tp-align-btn" data-align="center" data-i18n="table.alignCenter" title="居中">中</button>
+              <button type="button" class="tp-align-btn" data-align="right" data-i18n="table.alignRight" title="右对齐">右</button>
             </div>
           </div>
         </div>
@@ -198,8 +198,8 @@
         </div>
         <div id="editor-empty">
           <svg class="empty-art" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <p class="empty-title">选择左侧一篇笔记，或点击「＋」新建</p>
-          <p class="empty-sub">也可以将 Markdown 文件拖入窗口直接打开</p>
+          <p class="empty-title" data-i18n="editor.empty.title">选择左侧一篇笔记，或点击「＋」新建</p>
+          <p class="empty-sub" data-i18n="editor.empty.sub">也可以将 Markdown 文件拖入窗口直接打开</p>
         </div>
         <div id="statusbar" hidden>
           <span id="word-count"></span>
@@ -216,10 +216,10 @@
       <div class="history-box" role="dialog" aria-modal="true" aria-labelledby="history-title">
         <div class="history-header">
           <div class="history-heading">
-            <p class="history-title" id="history-title">历史版本</p>
+            <p class="history-title" id="history-title" data-i18n="history.title">历史版本</p>
             <p class="history-sub" id="history-sub"></p>
           </div>
-          <button id="history-close" class="history-close" title="关闭 (Esc)" aria-label="关闭">
+          <button id="history-close" class="history-close" data-i18n-title="history.close" title="关闭 (Esc)" aria-label="关闭">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
@@ -229,14 +229,14 @@
             <div class="history-view-head">
               <div class="history-view-meta" id="history-view-meta"></div>
               <div class="history-view-actions">
-                <button id="history-compare-btn" class="history-compare" hidden title="把选中的版本与对比源逐行对比">对比</button>
-                <button id="history-restore-btn" class="history-restore" hidden title="把笔记内容恢复为这个版本（当前内容将被覆盖）">恢复此版本</button>
+                <button id="history-compare-btn" class="history-compare" hidden data-i18n="history.compare" data-i18n-title="history.compare" title="把选中的版本与对比源逐行对比">对比</button>
+                <button id="history-restore-btn" class="history-restore" hidden data-i18n="history.restore" data-i18n-title="history.restore" title="把笔记内容恢复为这个版本（当前内容将被覆盖）">恢复此版本</button>
               </div>
             </div>
             <div class="history-compare-bar" id="history-compare-bar" hidden>
-              <span class="history-compare-label">对比源</span>
-              <select id="history-compare-src" class="history-compare-src" title="选择对比的基准版本"></select>
-              <span class="history-compare-hint">默认最新版本 · 选中左侧版本查看与源的逐行差异</span>
+              <span class="history-compare-label" data-i18n="history.compareLabel">对比源</span>
+              <select id="history-compare-src" class="history-compare-src" data-i18n-title="history.compareSrc" title="选择对比的基准版本"></select>
+              <span class="history-compare-hint" data-i18n="history.compareHint">默认最新版本 · 选中左侧版本查看与源的逐行差异</span>
             </div>
             <div class="history-view-content markdown-body" id="history-view-content"></div>
           </div>
@@ -247,12 +247,12 @@
     <!-- 提交新版本弹层 -->
     <div id="commit-overlay" hidden>
       <div class="commit-box" role="alertdialog" aria-modal="true" aria-labelledby="commit-title">
-        <p class="commit-title" id="commit-title">提交新版本</p>
+        <p class="commit-title" id="commit-title" data-i18n="commit.title">提交新版本</p>
         <p class="commit-text" id="commit-text"></p>
-        <input id="commit-input" class="commit-input" type="text" placeholder="提交说明（可留空），例如：完成初稿" maxlength="200" spellcheck="false" />
+        <input id="commit-input" class="commit-input" type="text" data-i18n-placeholder="commit.placeholder" placeholder="提交说明（可留空），例如：完成初稿" maxlength="200" spellcheck="false" />
         <div class="commit-actions">
-          <button id="commit-cancel" class="btn-secondary">取消</button>
-          <button id="commit-ok" class="btn-primary">提交</button>
+          <button id="commit-cancel" class="btn-secondary" data-i18n="commit.cancel">取消</button>
+          <button id="commit-ok" class="btn-primary" data-i18n="commit.ok">提交</button>
         </div>
       </div>
     </div>
@@ -261,11 +261,11 @@
     <div id="confirm-overlay" hidden>
       <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
         <svg class="confirm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-        <p class="confirm-title" id="confirm-title">删除这篇笔记？</p>
-        <p class="confirm-text" id="confirm-text">删除后将无法恢复，请确认后再操作。</p>
+        <p class="confirm-title" id="confirm-title" data-i18n="confirm.title.deleteNote">删除这篇笔记？</p>
+        <p class="confirm-text" id="confirm-text" data-i18n="confirm.text.deleteNote">删除后将无法恢复，请确认后再操作。</p>
         <div class="confirm-actions">
-          <button id="confirm-cancel" class="btn-secondary">取消</button>
-          <button id="confirm-ok" class="btn-danger">删除</button>
+          <button id="confirm-cancel" class="btn-secondary" data-i18n="confirm.cancel">取消</button>
+          <button id="confirm-ok" class="btn-danger" data-i18n="confirm.ok.delete">删除</button>
         </div>
       </div>
     </div>
@@ -274,63 +274,60 @@
     <div id="settings-overlay" hidden>
       <div class="settings-box" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="settings-header">
-          <p class="settings-title" id="settings-title">设置</p>
-          <button id="settings-close" class="settings-close" title="关闭 (Esc)" aria-label="关闭">
+          <p class="settings-title" id="settings-title" data-i18n="settings.title">设置</p>
+          <button id="settings-close" class="settings-close" data-i18n-title="settings.close" title="关闭 (Esc)" aria-label="关闭">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
         <div class="settings-body">
           <aside id="settings-sidebar" class="settings-sidebar">
             <button class="settings-nav-item active" data-category="appearance" aria-current="true">
-              <span class="settings-nav-label">外观</span>
+              <span class="settings-nav-label" data-i18n="settings.category.appearance">外观</span>
             </button>
             <button class="settings-nav-item" data-category="editing">
-              <span class="settings-nav-label">编辑</span>
-            </button>
-            <button class="settings-nav-item" data-category="sidebar">
-              <span class="settings-nav-label">侧栏</span>
+              <span class="settings-nav-label" data-i18n="settings.category.editing">编辑</span>
             </button>
           </aside>
           <div class="settings-content">
             <div class="settings-section" data-section="appearance">
-              <p class="settings-section-title">外观</p>
+              <p class="settings-section-title" data-i18n="settings.appearance">外观</p>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">主题</span>
-                  <span class="settings-desc">明暗主题自动跟随系统或手动切换</span>
+                  <span class="settings-label" data-i18n="settings.theme">主题</span>
+                  <span class="settings-desc" data-i18n="settings.theme.desc">明暗主题自动跟随系统或手动切换</span>
                 </div>
                 <select id="setting-theme" class="settings-select">
-                  <option value="system">跟随系统</option>
-                  <option value="light">浅色</option>
-                  <option value="dark">深色</option>
+                  <option value="system" data-i18n="settings.theme.system">跟随系统</option>
+                  <option value="light" data-i18n="settings.theme.light">浅色</option>
+                  <option value="dark" data-i18n="settings.theme.dark">深色</option>
                 </select>
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">默认视图</span>
-                  <span class="settings-desc">新建或打开笔记后的初始视图模式</span>
+                  <span class="settings-label" data-i18n="settings.defaultView">默认视图</span>
+                  <span class="settings-desc" data-i18n="settings.defaultView.desc">新建或打开笔记后的初始视图模式</span>
                 </div>
                 <select id="setting-view" class="settings-select">
-                  <option value="edit">编辑</option>
-                  <option value="split">分屏</option>
-                  <option value="preview">预览</option>
+                  <option value="edit" data-i18n="settings.view.edit">编辑</option>
+                  <option value="split" data-i18n="settings.view.split">分屏</option>
+                  <option value="preview" data-i18n="settings.view.preview">预览</option>
                 </select>
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">内容密度</span>
-                  <span class="settings-desc">调节编辑与预览区域的留白和排版间距</span>
+                  <span class="settings-label" data-i18n="settings.contentDensity">内容密度</span>
+                  <span class="settings-desc" data-i18n="settings.contentDensity.desc">调节编辑与预览区域的留白和排版间距</span>
                 </div>
                 <select id="setting-content-density" class="settings-select">
-                  <option value="standard" selected>标准</option>
-                  <option value="sparse">稀疏</option>
-                  <option value="compact">紧凑</option>
+                  <option value="standard" selected data-i18n="settings.density.standard">标准</option>
+                  <option value="sparse" data-i18n="settings.density.sparse">稀疏</option>
+                  <option value="compact" data-i18n="settings.density.compact">紧凑</option>
                 </select>
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">字体大小</span>
-                  <span class="settings-desc">编辑器与预览区域的基础字号</span>
+                  <span class="settings-label" data-i18n="settings.fontSize">字体大小</span>
+                  <span class="settings-desc" data-i18n="settings.fontSize.desc">编辑器与预览区域的基础字号</span>
                 </div>
                 <select id="setting-font-size" class="settings-select">
                   <option value="13">小</option>
@@ -339,13 +336,32 @@
                   <option value="17">特大</option>
                 </select>
               </div>
-            </div>
-            <div class="settings-section" data-section="editing" hidden>
-              <p class="settings-section-title">编辑</p>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">自动保存</span>
-                  <span class="settings-desc">输入停顿后自动保存到磁盘</span>
+                  <span class="settings-label" data-i18n="settings.sidebarWidth">默认侧栏宽度</span>
+                  <span class="settings-desc" data-i18n="settings.sidebarWidth.desc">应用启动时的侧栏宽度</span>
+                </div>
+                <select id="setting-sidebar-width" class="settings-select">
+                  <option value="220">220</option>
+                  <option value="260" selected>260</option>
+                  <option value="300">300</option>
+                  <option value="360">360</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.language">语言</span>
+                  <span class="settings-desc" data-i18n="settings.language.desc">界面显示语言</span>
+                </div>
+                <select id="setting-language" class="settings-select"></select>
+              </div>
+            </div>
+            <div class="settings-section" data-section="editing" hidden>
+              <p class="settings-section-title" data-i18n="settings.editing">编辑</p>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.autosave">自动保存</span>
+                  <span class="settings-desc" data-i18n="settings.autosave.desc">输入停顿后自动保存到磁盘</span>
                 </div>
                 <label class="switch">
                   <input id="setting-autosave" type="checkbox" checked />
@@ -354,8 +370,8 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">显示行号</span>
-                  <span class="settings-desc">在编辑器左侧显示行号</span>
+                  <span class="settings-label" data-i18n="settings.lineNumbers">显示行号</span>
+                  <span class="settings-desc" data-i18n="settings.lineNumbers.desc">在编辑器左侧显示行号</span>
                 </div>
                 <label class="switch">
                   <input id="setting-line-numbers" type="checkbox" checked />
@@ -364,29 +380,14 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label">自动保存延迟</span>
-                  <span class="settings-desc">停止输入后多久开始保存</span>
+                  <span class="settings-label" data-i18n="settings.autosaveDelay">自动保存延迟</span>
+                  <span class="settings-desc" data-i18n="settings.autosaveDelay.desc">停止输入后多久开始保存</span>
                 </div>
                 <select id="setting-autosave-delay" class="settings-select">
                   <option value="300">0.3 秒</option>
                   <option value="500" selected>0.5 秒</option>
                   <option value="1000">1 秒</option>
                   <option value="2000">2 秒</option>
-                </select>
-              </div>
-            </div>
-            <div class="settings-section" data-section="sidebar" hidden>
-              <p class="settings-section-title">侧栏</p>
-              <div class="settings-row">
-                <div class="settings-row-main">
-                  <span class="settings-label">默认侧栏宽度</span>
-                  <span class="settings-desc">应用启动时的侧栏宽度</span>
-                </div>
-                <select id="setting-sidebar-width" class="settings-select">
-                  <option value="220">220</option>
-                  <option value="260" selected>260</option>
-                  <option value="300">300</option>
-                  <option value="360">360</option>
                 </select>
               </div>
             </div>

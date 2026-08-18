@@ -1,4 +1,5 @@
 import type { Align } from "./types";
+import { t } from "./i18n";
 
 /* 智能表格插入弹层 */
 export const TABLE_GRID_ROWS = 8; // 网格选择器最大行数
@@ -121,13 +122,17 @@ export function splitPipeLine(line: string): string[] {
 }
 
 export const SMART_DELIMS = [
-  { label: "Tab", ch: "\t", quoted: false },
-  { label: "竖线", ch: "|", quoted: false },
-  { label: "逗号", ch: ",", quoted: true },
-  { label: "分号", ch: ";", quoted: true },
-  { label: "中文逗号", ch: "，", quoted: true },
-  { label: "中文分号", ch: "；", quoted: true },
+  { key: "tab", ch: "\t", quoted: false },
+  { key: "pipe", ch: "|", quoted: false },
+  { key: "comma", ch: ",", quoted: true },
+  { key: "semicolon", ch: ";", quoted: true },
+  { key: "chineseComma", ch: "，", quoted: true },
+  { key: "chineseSemicolon", ch: "；", quoted: true },
 ] as const;
+
+export function getDelimLabel(d: { key: string }): string {
+  return t(`table.delim.${d.key}`);
+}
 
 export const MD_SEP_RE = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
 
@@ -198,7 +203,7 @@ export function detectTableData(
     if (modal < 2 || modalCount < 2) continue;
     const consistent = parsed.filter((r) => r.length === modal).length;
     if (!best || consistent > best.consistent) {
-      best = { rows: parsed.filter((r) => r.length === modal), consistent, label: d.label };
+      best = { rows: parsed.filter((r) => r.length === modal), consistent, label: getDelimLabel(d) };
     }
   }
   if (!best) return null;
@@ -238,7 +243,7 @@ function insertGridTable() {
   for (let r = 0; r < tpCursorR; r++) {
     rows.push(
       Array.from({ length: tpCursorC }, (_, c) =>
-        r === 0 && tpHeaderEl.checked ? `列${c + 1}` : "内容",
+        r === 0 && tpHeaderEl.checked ? t("table.headerCell", { col: c + 1 }) : t("table.cell"),
       ),
     );
   }
@@ -266,7 +271,7 @@ function setTpCursor(r: number, c: number) {
     const cc = Number(cell.dataset.c);
     cell.classList.toggle("hover", cr <= tpCursorR && cc <= tpCursorC);
   }
-  tpSizeEl.textContent = `${tpCursorR} 行 × ${tpCursorC} 列`;
+  tpSizeEl.textContent = t("table.size", { rows: tpCursorR, cols: tpCursorC });
 }
 
 function buildTpGrid() {
@@ -319,11 +324,11 @@ export function openTablePopover() {
     const m = tpDetected.rows[0].length;
     tpSmartEl.hidden = false;
     if (tpDetected.aligns) {
-      tpSmartDescEl.textContent = `已识别 Markdown 表格：${n} 行 × ${m} 列，点击整理格式`;
-      tpSmartApplyBtn.textContent = "整理表格";
+      tpSmartDescEl.textContent = t("table.smartDetectedMd", { rows: n, cols: m });
+      tpSmartApplyBtn.textContent = t("table.smartApply");
     } else {
-      tpSmartDescEl.textContent = `已识别 ${n} 行 × ${m} 列数据（${tpDetected.label ?? "分隔"} 分隔），点击转换为表格`;
-      tpSmartApplyBtn.textContent = "转换为表格";
+      tpSmartDescEl.textContent = t("table.smartDetectedData", { rows: n, cols: m, label: tpDetected.label ?? "" });
+      tpSmartApplyBtn.textContent = t("table.smartApply");
     }
   } else {
     tpSmartEl.hidden = true;

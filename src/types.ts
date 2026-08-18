@@ -34,6 +34,12 @@ export interface OpenFile {
   content: string;
 }
 
+/** 轮询命令 sync_fs_state 的返回：外部改名同步结果 + 各路径存在性 */
+export interface FsSyncResult {
+  changed: NoteMeta[];
+  exists: boolean[];
+}
+
 export type ViewMode = "edit" | "split" | "preview";
 
 export function parseViewMode(value: unknown): ViewMode {

@@ -61,6 +61,7 @@ import {
 import { closeTablePopover, initTablePopover, toggleTablePopover } from "./table";
 import { parseViewMode } from "./types";
 import type { FsSyncResult, Note, NoteMeta, OpenFile, Source } from "./types";
+import { applyI18nToDocument, initI18n, setLocale, t } from "./i18n";
 
 /* ---------- DOM 元素 ---------- */
 const openFileBtn = document.querySelector<HTMLButtonElement>("#open-file-btn")!;
@@ -203,7 +204,7 @@ async function pollFileStates() {
         if (!renameHints.has(id)) {
           renameHints.add(id);
           const n = state.notes.find((x) => x.id === id);
-          if (n) setStatus(`检测到外部重命名，已同步为「${n.title}」`);
+          if (n) setStatus(t("status.externalRename", { title: n.title }));
         }
       }
     }
@@ -224,7 +225,7 @@ async function pollFileStates() {
 async function save() {
   if (!state.dirty || !state.current) return;
   const content = getEditorText();
-  setSaveStatus("saving", "保存中…");
+  setSaveStatus("saving", t("status.saving"));
 
   try {
     if (state.current.kind === "note") {
@@ -247,8 +248,8 @@ async function save() {
         setSaveStatus(
           "saved",
           renamed
-            ? `已保存 ${fmtTime(meta.updatedAt)}（文件已同步重命名为 ${baseName(meta.path)}）`
-            : `已保存 ${fmtTime(meta.updatedAt)}`,
+            ? t("status.saved.renamed", { time: fmtTime(meta.updatedAt), name: baseName(meta.path) })
+            : t("status.saved", { time: fmtTime(meta.updatedAt) }),
         );
       }
     } else {
@@ -260,15 +261,15 @@ async function save() {
       const f = state.openFiles.find((f) => f.path === path);
       if (f) f.content = content;
       if (!state.dirty && state.current.kind === "file" && state.current.path === path) {
-        setSaveStatus("saved", `已保存 ${fmtTime(updatedAt)}`);
+        setSaveStatus("saved", t("status.saved", { time: fmtTime(updatedAt) }));
       }
     }
   } catch (e) {
-    setSaveStatus("error", `保存失败: ${e}`);
+    setSaveStatus("error", t("status.error.save", { error: String(e) }));
     return;
   }
   // 保存期间又有新输入：恢复“输入中…”提示
-  if (state.dirty) setStatus("输入中…");
+  if (state.dirty) setStatus(t("status.typing"));
 }
 
 async function flushSave() {
@@ -318,7 +319,7 @@ function adaptiveDelay(base: number): number {
 
 function scheduleSave() {
   state.dirty = true;
-  setStatus("输入中…");
+  setStatus(t("status.typing"));
   window.clearTimeout(saveTimer);
   if (!isAutosaveEnabled()) return;
   const delay = adaptiveDelay(getAutosaveDelay());
@@ -344,16 +345,16 @@ async function selectSource(src: Source) {
     const note = await invoke<Note>("get_note", { id: src.id });
     commitNoteBtn.hidden = false;
     saveAsNoteBtn.hidden = true;
-    deleteNoteBtn.textContent = "删除";
-    deleteNoteBtn.title = "删除这篇笔记";
+    deleteNoteBtn.textContent = t("editor.header.delete");
+    deleteNoteBtn.title = t("editor.header.delete");
     deleteNoteBtn.classList.remove("close-mode");
     openInEditor(note.title, note.content, note.path);
   } else {
     const f = state.openFiles.find((f) => f.path === src.path)!;
     commitNoteBtn.hidden = true;
     saveAsNoteBtn.hidden = false;
-    deleteNoteBtn.textContent = "关闭";
-    deleteNoteBtn.title = "关闭这个文件（不会删除磁盘上的文件）";
+    deleteNoteBtn.textContent = t("editor.header.closeFile");
+    deleteNoteBtn.title = t("editor.header.closeFile");
     deleteNoteBtn.classList.add("close-mode");
     openInEditor(f.name, f.content, f.path);
   }
@@ -368,22 +369,22 @@ async function batchDeleteSelected(ids: string[]) {
   const filePaths = ids.filter((id) => state.openFiles.some((f) => f.path === id));
   const total = noteIds.length + filePaths.length;
   if (total === 0) {
-    setStatus("所选条目中没有可删除的内容");
+    setStatus(t("status.batch.noDeletable"));
     return;
   }
   const parts: string[] = [];
-  if (noteIds.length > 0) parts.push(`删除 ${noteIds.length} 篇笔记`);
-  if (filePaths.length > 0) parts.push(`关闭 ${filePaths.length} 个外部文件`);
+  if (noteIds.length > 0) parts.push(t("batch.deleteNote", { count: noteIds.length }));
+  if (filePaths.length > 0) parts.push(t("batch.closeFile", { count: filePaths.length }));
   const text =
     noteIds.length > 0 && filePaths.length > 0
-      ? "笔记会被永久删除；外部文件仅从列表关闭，磁盘上的文件不受影响。"
+      ? t("confirm.text.batchMixed")
       : noteIds.length > 0
-        ? "删除后将无法恢复，请确认后再操作。"
-        : "仅从列表关闭这些文件，磁盘上的文件不会被删除。";
+        ? t("confirm.text.batchNote")
+        : t("confirm.text.batchFile");
   openConfirm({
-    title: `${parts.join("并")}？`,
+    title: `${parts.join(t("common.and"))}？`,
     text,
-    okLabel: noteIds.length > 0 ? "删除" : "关闭",
+    okLabel: noteIds.length > 0 ? t("confirm.ok.delete") : t("confirm.ok.close"),
     danger: noteIds.length > 0,
     action: async () => {
       try {
@@ -399,11 +400,11 @@ if (state.current?.kind === "note" && noteIds.includes(state.current.id)) {
         clearSelection();
         await refreshList();
         const doneParts: string[] = [];
-        if (noteIds.length > 0) doneParts.push(`${noteIds.length} 篇笔记已删除`);
-        if (filePaths.length > 0) doneParts.push(`${filePaths.length} 个文件已关闭`);
+        if (noteIds.length > 0) doneParts.push(t("status.batch.deleteDone", { count: noteIds.length }));
+        if (filePaths.length > 0) doneParts.push(t("status.batch.closeDone", { count: filePaths.length }));
         setStatus(doneParts.join("，"));
       } catch (err) {
-        setStatus(`批量删除失败: ${err}`);
+        setStatus(t("status.batch.deleteFail", { error: String(err) }));
       }
     },
   });
@@ -413,13 +414,13 @@ async function batchExportSelected(ids: string[]) {
   const noteIds = ids.filter((id) => state.notes.some((n) => n.id === id));
   const filePaths = ids.filter((id) => state.openFiles.some((f) => f.path === id));
   if (noteIds.length === 0 && filePaths.length === 0) {
-    setStatus("所选条目中没有可导出的内容");
+    setStatus(t("status.batch.noExportable"));
     return;
   }
   try {
-    const defaultName = `导出_${new Date().toISOString().slice(0, 10)}.zip`;
+    const defaultName = `${t("dialog.exportFilePrefix")}_${new Date().toISOString().slice(0, 10)}.zip`;
     const picked = await saveDialog({
-      title: "导出选中条目",
+      title: t("dialog.export"),
       defaultPath: defaultName,
       filters: [{ name: "ZIP", extensions: ["zip"] }],
     });
@@ -431,10 +432,10 @@ async function batchExportSelected(ids: string[]) {
       paths: filePaths,
       zipPath,
     });
-    setStatus(`已导出 ${count} 个文件到 ${zipPath}`);
+    setStatus(t("status.exported", { count, path: zipPath }));
     clearSelection();
   } catch (err) {
-    setStatus(`导出失败: ${err}`);
+    setStatus(t("status.exportFail", { error: String(err) }));
   }
 }
 
@@ -442,9 +443,9 @@ async function batchExportSelected(ids: string[]) {
 async function newNote() {
   await flushSave();
   const picked = await saveDialog({
-    title: "新建笔记",
-    defaultPath: "无标题笔记.md",
-    filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+    title: t("dialog.newNote"),
+    defaultPath: t("dialog.untitledNote") + ".md",
+    filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
   });
   if (!picked) return;
   let path = picked;
@@ -461,10 +462,10 @@ async function newNote() {
     await selectSource({ kind: "note", id: meta.id });
     const chosenStem = path.replace(/\.(md|markdown)$/i, "");
     if (meta.title !== chosenStem) {
-      setStatus(`已新建笔记「${meta.title}」（名称与已有笔记重名，自动加序号）`);
+      setStatus(t("status.newNoteCreated", { title: meta.title }));
     }
   } catch (err) {
-    setStatus(`新建笔记失败: ${err}`);
+    setStatus(t("status.newNoteFail", { error: String(err) }));
   }
 }
 
@@ -496,20 +497,20 @@ async function openPaths(paths: string[]): Promise<boolean> {
   }
   if (toSelect.length > 0) {
     await selectSource({ kind: "file", path: toSelect[0] });
-    if (fresh.length > 1) setStatus(`已打开 ${fresh.length} 个文件`);
+    if (fresh.length > 1) setStatus(t("status.filesOpened", { count: fresh.length }));
   }
-  if (errors.length > 0) setStatus(`打开失败: ${errors.join("；")}`);
+  if (errors.length > 0) setStatus(t("status.openFail", { error: errors.join("；") }));
   return toSelect.length > 0;
 }
 
 async function openFileDialog() {
   const picked = await openDialog({
     multiple: true,
-    title: "打开 Markdown 文件",
+    title: t("dialog.openFile"),
     filters: [
-      { name: "Markdown", extensions: ["md", "markdown"] },
-      { name: "文本文件", extensions: ["txt"] },
-      { name: "所有文件", extensions: ["*"] },
+      { name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] },
+      { name: t("dialog.filter.text"), extensions: ["txt"] },
+      { name: t("dialog.filter.all"), extensions: ["*"] },
     ],
   });
   if (!picked) return;
@@ -522,7 +523,7 @@ async function revealInFolder(path: string) {
   try {
     await invoke("reveal_in_folder", { path });
   } catch (err) {
-    setStatus(`打开文件位置失败: ${err}`);
+    setStatus(t("status.revealFail", { error: String(err) }));
   }
 }
 
@@ -545,19 +546,19 @@ async function saveFileAsNote(path?: string) {
   const f = state.openFiles.find((f) => f.path === target);
   if (!f) return;
   if (state.missingPaths.has(pathKey(target))) {
-    setStatus("源文件已被删除，无法另存为笔记");
+    setStatus(t("status.saveAsSourceMissing"));
     return;
   }
 
   const dir = dirOfPath(f.path);
-  const stem = baseName(f.path).replace(/\.(md|markdown|txt)$/i, "") || "无标题笔记";
+  const stem = baseName(f.path).replace(/\.(md|markdown|txt)$/i, "") || t("dialog.untitledNote");
   const sep = dir.includes("/") ? "/" : "\\";
   const defaultPath = dir ? dir + sep + stem + ".md" : stem + ".md";
 
   const picked = await saveDialog({
-    title: "另存为笔记",
+    title: t("dialog.saveAs"),
     defaultPath,
-    filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+    filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
   });
   if (!picked) return;
   let dst = picked;
@@ -565,7 +566,7 @@ async function saveFileAsNote(path?: string) {
 
   const noteAtPath = state.notes.find((n) => pathKey(n.path) === pathKey(dst));
   if (noteAtPath) {
-    setStatus("该位置已是一篇笔记「" + noteAtPath.title + "」，请选择其他位置");
+    setStatus(t("status.saveAsConflict", { title: noteAtPath.title }));
     return;
   }
   const otherOpen = state.openFiles.find(
@@ -590,20 +591,20 @@ async function saveFileAsNote(path?: string) {
       const renamed = pathKey(meta.path) !== pathKey(dst);
       setStatus(
         renamed
-          ? "已另存为笔记「" + meta.title + "」（名称与已有笔记/文件重名，已保存为 " + baseName(meta.path) + "）"
-          : "已另存为笔记「" + meta.title + "」",
+          ? t("status.newNoteSavedAsRenamed", { title: meta.title, name: baseName(meta.path) })
+          : t("status.newNoteSavedAs", { title: meta.title }),
       );
     } catch (err) {
-      setStatus("另存为笔记失败: " + err);
+      setStatus(t("status.saveAsFail", { error: String(err) }));
     }
   };
 
   const [exists] = await invoke<boolean[]>("files_exist", { paths: [dst] });
   if (exists) {
     openConfirm({
-      title: "目标文件已存在",
-      text: "该位置已有文件，继续将覆盖它：\n" + dst + "\n\n原外部文件不受影响。",
-      okLabel: "覆盖",
+      title: t("confirm.title.overwrite"),
+      text: t("confirm.text.overwrite", { path: dst }),
+      okLabel: t("confirm.ok.overwrite"),
       danger: true,
       action: () => doSave(true),
     });
@@ -619,9 +620,9 @@ function requestDelete(id?: string) {
     return;
   }
   openConfirm({
-    title: "删除这篇笔记？",
-    text: "删除后将无法恢复，请确认后再操作。",
-    okLabel: "删除",
+    title: t("confirm.title.deleteNote"),
+    text: t("confirm.text.deleteNote"),
+    okLabel: t("confirm.ok.delete"),
     danger: true,
     action: async () => {
       try {
@@ -631,7 +632,7 @@ function requestDelete(id?: string) {
         }
         await refreshList();
       } catch (err) {
-        setStatus(`删除失败: ${err}`);
+        setStatus(t("status.deleteFail", { error: String(err) }));
       }
     },
   });
@@ -647,25 +648,25 @@ function onListContextMenu(e: MouseEvent) {
     const path = state.notes.find((n) => n.id === id)?.path ?? "";
     void selectSource({ kind: "note", id });
     showContextMenu(e.clientX, e.clientY, [
-      { label: "重命名", action: () => startRename(id) },
+      { label: t("contextMenu.rename"), action: () => startRename(id) },
       {
-        label: "提交新版本",
+        label: t("contextMenu.commit"),
         action: () => void requestCommit(id, flushSave, setStatus),
       },
-      { label: "查看历史版本", action: () => void openHistory(id, flushSave) },
-      { label: "打开文件所在位置", action: () => void revealInFolder(path) },
-      { label: "删除", danger: true, action: () => requestDelete(id) },
+      { label: t("contextMenu.history"), action: () => void openHistory(id, flushSave) },
+      { label: t("contextMenu.reveal"), action: () => void revealInFolder(path) },
+      { label: t("contextMenu.delete"), danger: true, action: () => requestDelete(id) },
     ]);
   } else if (li?.dataset.filePath) {
     const path = li.dataset.filePath;
     void selectSource({ kind: "file", path });
     showContextMenu(e.clientX, e.clientY, [
-      { label: "另存为笔记", action: () => void saveFileAsNote(path) },
-      { label: "打开文件所在位置", action: () => void revealInFolder(path) },
-      { label: "关闭文件", action: () => void closeFile(path) },
+      { label: t("contextMenu.saveAsNote"), action: () => void saveFileAsNote(path) },
+      { label: t("contextMenu.reveal"), action: () => void revealInFolder(path) },
+      { label: t("contextMenu.closeFile"), action: () => void closeFile(path) },
     ]);
   } else {
-    showContextMenu(e.clientX, e.clientY, [{ label: "新建笔记", action: () => void newNote() }]);
+    showContextMenu(e.clientX, e.clientY, [{ label: t("contextMenu.newNote"), action: () => void newNote() }]);
   }
 }
 
@@ -673,6 +674,8 @@ function onListContextMenu(e: MouseEvent) {
 window.addEventListener("DOMContentLoaded", async () => {
   // 1. 初始化设置
   applySettings();
+  await initI18n();
+  applyI18nToDocument();
   themeToggleBtn.addEventListener("click", toggleTheme);
 
   // 2. 初始化窗口无边框控制
@@ -709,7 +712,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // 6. 初始化子模块
   initDialogs();
-  const settingsEls = syncSettingsUI();
+  let settingsEls = syncSettingsUI();
   settingsToggleBtn.addEventListener("click", openSettings);
   document.getElementById("settings-close")?.addEventListener("click", closeSettings);
   document.getElementById("settings-overlay")?.addEventListener("click", (e) => {
@@ -758,6 +761,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     localStorage.setItem("notebook:line-numbers", settingsEls.lineNumbers.checked ? "1" : "0");
     setLineNumbersEnabled(settingsEls.lineNumbers.checked);
   });
+  settingsEls.language.addEventListener("change", async () => {
+    await setLocale(settingsEls.language.value);
+    applyI18nToDocument();
+    const refreshedSettings = syncSettingsUI();
+    settingsEls = refreshedSettings;
+    openSettings();
+  });
 
   initTablePopover(applyTableTextToEditor, () => {
     return {
@@ -776,9 +786,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (isCurrent) {
         const opened = await invoke<Note>("get_note", { id: restored.id });
         openInEditor(opened.title, opened.content, opened.path);
-        setStatus("已恢复版本（如需保留请点击「提交」记录为新版本）");
+        setStatus(t("status.versionRestored"));
       } else {
-        setStatus(`已将「${restored.title}」恢复到指定版本`);
+        setStatus(t("status.versionRestoredOther", { title: restored.title }));
       }
     },
     (msg) => setStatus(msg),
@@ -806,13 +816,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     markPreviewLayoutDirty: () => previewApi?.markLayoutDirty(),
     previewElement: previewApi.element,
   });
+  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
   initSidebar(
     selectSource,
     setStatus,
     onListContextMenu,
     (id, updated) => {
       // 侧栏行内改名成功后的状态提示
-      setStatus(`已重命名为「${updated.title}」`);
+      setStatus(t("status.renameSuccess", { title: updated.title }));
       if (state.current?.kind === "note" && state.current.id === id) {
         const titleEl = document.querySelector<HTMLSpanElement>("#editor-title")!;
         titleEl.textContent = updated.title;

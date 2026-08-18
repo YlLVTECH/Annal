@@ -80,8 +80,12 @@ export function initShortcuts(handlers: ShortcutHandlers) {
     const editorActive = handlers.editorHasFocus();
     if (!editorActive || !canEditCurrent()) return;
 
-    // 撤销/重做（Ctrl+Z/Y）：由 CodeMirror 内置历史处理，全局不拦截；
+    // 撤销/重做（Ctrl+Z/Y）：交给 CodeMirror 内置历史，全局必须放行；
     // 视图切换键位已在上方处理。这里补充 CM 默认键位未绑定的格式快捷键。
+    if (mod && (k === "z" || k === "y")) {
+      return;
+    }
+
     if (mod && !isComposing() && k === "b") {
       e.preventDefault();
       runCommand("bold");

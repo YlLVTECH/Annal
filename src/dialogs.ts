@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { state } from "./state";
 import { parseViewMode } from "./types";
+import { getAvailableLocales, t } from "./i18n";
 import type { CtxItem, NoteVersion } from "./types";
 
 /* ---------- DOM 元素获取 ---------- */
@@ -26,6 +27,7 @@ const settingAutosaveEl = document.querySelector<HTMLInputElement>("#setting-aut
 const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setting-autosave-delay")!;
 const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
 const settingLineNumbersEl = document.querySelector<HTMLInputElement>("#setting-line-numbers")!;
+const settingLanguageEl = document.querySelector<HTMLSelectElement>("#setting-language")!;
 const settingsSidebarEl = document.querySelector<HTMLElement>("#settings-sidebar")!;
 const settingsContentEl = document.querySelector<HTMLElement>(".settings-content")!;
 const settingsNavItems = settingsSidebarEl.querySelectorAll<HTMLButtonElement>(".settings-nav-item");
@@ -43,7 +45,7 @@ export function openConfirm(opts: {
 }) {
   confirmTitleEl.textContent = opts.title;
   confirmTextEl.textContent = opts.text;
-  confirmOkBtn.textContent = opts.okLabel ?? "确定";
+  confirmOkBtn.textContent = opts.okLabel ?? t("confirm.okDefault");
   confirmOkBtn.classList.toggle("btn-danger", opts.danger !== false);
   confirmOkBtn.classList.toggle("btn-primary", opts.danger === false);
   confirmAction = opts.action;
@@ -85,7 +87,7 @@ export async function requestCommit(
   }
   commitNoteId = noteId;
   const meta = state.notes.find((n) => n.id === noteId);
-  commitTextEl.textContent = `将把「${meta?.title ?? "笔记"}」的当前内容记录为一个新版本`;
+  commitTextEl.textContent = t("commit.confirmText", { title: meta?.title ?? t("history.title.default") });
   commitInputEl.value = "";
   commitOverlayEl.hidden = false;
   commitInputEl.focus();
@@ -101,13 +103,13 @@ export async function doCommit() {
     const v = await invoke<NoteVersion | null>("commit_note", { id, message });
     if (onCommitSuccess) {
       if (v) {
-        onCommitSuccess(`已提交版本 #${v.seq}${v.message ? `：${v.message}` : ""}`);
+        onCommitSuccess(t("commit.success", { seq: v.seq, message: v.message ? `：${v.message}` : "" }));
       } else {
-        onCommitSuccess("内容与最新版本相同，没有生成新版本");
+        onCommitSuccess(t("commit.unchanged"));
       }
     }
   } catch (err) {
-    if (onCommitSuccess) onCommitSuccess(`提交失败: ${err}`);
+    if (onCommitSuccess) onCommitSuccess(t("commit.fail", { error: String(err) }));
   }
 }
 
@@ -227,17 +229,22 @@ export function getSettingsElements() {
     autosaveDelay: settingAutosaveDelayEl,
     sidebarWidth: settingSidebarWidthEl,
     lineNumbers: settingLineNumbersEl,
+    language: settingLanguageEl,
   };
 }
 
 export function switchSettingsCategory(category: string) {
+  // 若记忆的分类已不存在（如旧版独立的“语言”子项），回退到外观
+  const target = [...settingsSections].some((s) => s.dataset.section === category)
+    ? category
+    : "appearance";
   for (const item of settingsNavItems) {
-    const active = item.dataset.category === category;
+    const active = item.dataset.category === target;
     item.classList.toggle("active", active);
     item.setAttribute("aria-current", active ? "true" : "false");
   }
   for (const section of settingsSections) {
-    section.hidden = section.dataset.section !== category;
+    section.hidden = section.dataset.section !== target;
   }
 }
 
@@ -260,5 +267,16 @@ export function syncSettingsUI() {
 
   const savedCategory = localStorage.getItem("notebook:settings-category") || "appearance";
   switchSettingsCategory(savedCategory);
+
+  const currentLocale = localStorage.getItem("notebook:locale") || "zh-CN";
+  els.language.innerHTML = "";
+  for (const locale of getAvailableLocales()) {
+    const opt = document.createElement("option");
+    opt.value = locale.value;
+    opt.textContent = locale.label;
+    if (locale.value === currentLocale) opt.selected = true;
+    els.language.appendChild(opt);
+  }
+
   return els;
 }

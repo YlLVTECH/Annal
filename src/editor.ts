@@ -35,6 +35,7 @@ import {
   state,
 } from "./state";
 import { parseViewMode } from "./types";
+import { t } from "./i18n";
 import type { ViewMode } from "./types";
 
 /* ---------- 依赖注入（由 main.ts 提供） ---------- */
@@ -95,7 +96,7 @@ const extensions: Extension[] = [
   bracketMatching(),
   indentUnit.of("  "),
   markdown(),
-  placeholder("开始输入…"),
+  placeholder(t("editor.placeholder")),
   readOnlyCompartment.of(EditorState.readOnly.of(false)),
   EditorView.contentAttributes.of({
     spellcheck: "false",
@@ -153,7 +154,7 @@ function onDocChanged(
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export function setSaveStatus(status: SaveStatus, text = "") {
-  const suffix = status === "saving" ? "保存中…" : status === "saved" ? "已保存" : status === "error" ? "保存失败" : "";
+  const suffix = status === "saving" ? t("status.saving") : status === "saved" ? t("status.saved") : status === "error" ? t("status.error.save") : "";
   savedStatusEl.textContent = text || suffix;
   savedStatusEl.dataset.status = status;
 }
@@ -214,9 +215,9 @@ export function updateCount() {
   const chars = text.replace(/\s/g, "").length;
   const words = (text.match(/[A-Za-z0-9_]+/g) ?? []).length;
   const minutes = text.trim().length === 0 ? 0 : Math.max(1, Math.ceil(chars / 400));
-  const parts = [`${chars} 字`];
-  if (words > 0) parts.push(`${words} 词`);
-  if (minutes > 0) parts.push(`约 ${minutes} 分钟阅读`);
+  const parts = [t("editor.count.chars", { count: chars })];
+  if (words > 0) parts.push(t("editor.count.words", { count: words }));
+  if (minutes > 0) parts.push(t("editor.count.minutes", { count: minutes }));
   wordCountEl.textContent = parts.join(" · ");
 }
 
@@ -277,6 +278,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   } finally {
     loadingDoc = false;
   }
+  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
   v.scrollDOM.scrollTop = 0;
   editorBodyEl.hidden = false;
   editorHeaderEl.hidden = false;
@@ -323,9 +325,7 @@ export function closeEditor() {
 export function updateMissingBadge(gone: boolean, isFile: boolean) {
   missingBadgeEl.hidden = !gone;
   if (gone) {
-    savedStatusEl.textContent = isFile
-      ? "文件已被外部删除，继续输入会自动重新创建"
-      : "笔记文件已被外部删除，继续输入会自动重新创建";
+    savedStatusEl.textContent = isFile ? t("editor.missing.deleted") : t("editor.missing.note");
   }
 }
 
@@ -394,7 +394,7 @@ export function insertCodeBlock() {
   if (!canEditCurrent()) return;
   const v = getEditorView();
   const { from, to } = v.state.selection.main;
-  const selected = v.state.sliceDoc(from, to).trim() || "代码";
+  const selected = v.state.sliceDoc(from, to).trim() || t("editor.codePlaceholder");
   const before = v.state.sliceDoc(0, from);
   const after = v.state.sliceDoc(to);
   const needBefore = before.length > 0 && !before.endsWith("\n\n");
@@ -416,7 +416,7 @@ export function insertLink() {
   const selected = v.state.sliceDoc(from, to).trim();
   const isUrl =
     /^https?:\/\/\S+$/.test(selected) || /^(?:\w+\.)+\w+(?::\d+)?(?:\/\S*)?$/.test(selected);
-  const text = isUrl ? selected : selected || "链接文本";
+  const text = isUrl ? selected : selected || t("editor.linkPlaceholder");
   const url = isUrl ? (selected.startsWith("http") ? selected : `https://${selected}`) : "https://";
   const ins = `[${text}](${url})`;
   const urlStart = from + ins.indexOf("(") + 1;
@@ -433,10 +433,10 @@ export async function insertImage() {
   const source = state.current;
   const picked = await openDialog({
     multiple: true,
-    title: "插入图片",
+    title: t("editor.insertImage"),
     filters: [
       {
-        name: "图片",
+        name: t("editor.images"),
         extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"],
       },
     ],
@@ -446,7 +446,7 @@ export async function insertImage() {
   const blocks = paths
     .filter((p) => IMAGE_EXT_RE.test(p))
     .map((p) => {
-      const name = p.split(/[\\/]/).pop() ?? "图片";
+      const name = p.split(/[\\/]/).pop() ?? t("editor.imageFallback");
       const alt = name.replace(/\.[^.]+$/, "");
       const href = p.replace(/\\/g, "/");
       return `![${alt}](${href})`;
@@ -481,40 +481,40 @@ export function runCommand(cmd: string, onTableToggle?: () => void) {
   }
   switch (cmd) {
     case "h1":
-      prefixLines("# ", "标题");
+      prefixLines("# ", t("editor.command.h1"));
       break;
     case "h2":
-      prefixLines("## ", "标题");
+      prefixLines("## ", t("editor.command.h2"));
       break;
     case "h3":
-      prefixLines("### ", "标题");
+      prefixLines("### ", t("editor.command.h3"));
       break;
     case "bold":
-      wrapSelection("**", "**", "粗体");
+      wrapSelection("**", "**", t("editor.command.bold"));
       break;
     case "italic":
-      wrapSelection("*", "*", "斜体");
+      wrapSelection("*", "*", t("editor.command.italic"));
       break;
     case "strike":
-      wrapSelection("~~", "~~", "删除线");
+      wrapSelection("~~", "~~", t("editor.command.strike"));
       break;
     case "quote":
-      prefixLines("> ", "引用内容");
+      prefixLines("> ", t("editor.command.quote"));
       break;
     case "code":
-      wrapSelection("`", "`", "代码");
+      wrapSelection("`", "`", t("editor.command.code"));
       break;
     case "codeblock":
       insertCodeBlock();
       break;
     case "ul":
-      prefixLines("- ", "列表项");
+      prefixLines("- ", t("editor.command.ul"));
       break;
     case "ol":
-      prefixLines("1. ", "列表项");
+      prefixLines("1. ", t("editor.command.ol"));
       break;
     case "task":
-      prefixLines("- [ ] ", "待办事项");
+      prefixLines("- [ ] ", t("editor.command.task"));
       break;
     case "link":
       insertLink();
@@ -581,11 +581,11 @@ async function handlePasteImage(e: ClipboardEvent, v: EditorView) {
     }
   }
   if (!canEditCurrent()) {
-    if (failed > 0) setStatus(`图片粘贴失败：${failed} 张图片未能保存`);
+    if (failed > 0) setStatus(t("paste.imageFail", { count: failed }));
     return;
   }
   if (inserted.length === 0) {
-    if (failed > 0) setStatus(`图片粘贴失败：${failed} 张图片未能保存`);
+    if (failed > 0) setStatus(t("paste.imageFail", { count: failed }));
     return;
   }
   const text = inserted.join("\n\n");
@@ -595,7 +595,7 @@ async function handlePasteImage(e: ClipboardEvent, v: EditorView) {
     selection: { anchor: from + text.length },
     scrollIntoView: true,
   });
-  if (failed > 0) setStatus(`已插入 ${inserted.length} 张图片，${failed} 张保存失败`);
+  if (failed > 0) setStatus(t("paste.imageInserted", { inserted: inserted.length, failed }));
 }
 
 /* ---------- 生命周期 ---------- */

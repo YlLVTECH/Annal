@@ -13,6 +13,7 @@ import {
   setImgAspect,
   type MdBlock,
 } from "./markdownModel";
+import { t } from "./i18n";
 
 /** 视口外上下各多渲染的缓冲像素（提前渲染，滚动更稳） */
 const PREVIEW_BUFFER = 1600;
@@ -41,7 +42,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
 
   const emptyEl = document.createElement("div");
   emptyEl.className = "preview-empty";
-  emptyEl.textContent = "暂无内容，预览将显示在这里";
+  emptyEl.textContent = t("preview.empty");
   container.appendChild(emptyEl);
 
   /* 挂载块：blockId -> { el, version, height } */

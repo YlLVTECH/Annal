@@ -42,6 +42,23 @@ const LOCK_MS = 80;
 /* 超过该行数不做镜像测量（DOM 开销过大），回退比例同步 */
 const MIRROR_MAX_LINES = 20000;
 
+/* 连续输入时的镜像重建节流：每次编辑都全量重建镜像在长文档下开销大，
+ * 打字间隙内先复用上一次的测量（偏差仅限本次编辑的影响，停止输入后自动收敛），
+ * 由延后定时器强制重建并重新同步；宽度/字号等结构变化仍立即重建。 */
+const MIRROR_REBUILD_MIN_MS = 300;
+let mirrorRebuildTimer = 0;
+let lastMirrorRebuildAt = 0;
+let mirrorStructuralKey = "";
+
+function scheduleMirrorRebuild() {
+  if (mirrorRebuildTimer) return;
+  mirrorRebuildTimer = window.setTimeout(() => {
+    mirrorRebuildTimer = 0;
+    editorDirty = true;
+    scheduleResyncSplit();
+  }, MIRROR_REBUILD_MIN_MS);
+}
+
 export function markEditorDirty() {
   editorDirty = true;
 }
@@ -83,10 +100,23 @@ function ensureEditorLines(): boolean {
   if (lines.length > MIRROR_MAX_LINES) return false;
 
   const cs = getComputedStyle(ed);
-  const key = `${ed.clientWidth}|${cs.fontSize}|${cs.lineHeight}|${ed.value.length}`;
+  const structural = `${ed.clientWidth}|${cs.fontSize}|${cs.lineHeight}`;
+  const key = `${structural}|${ed.value.length}`;
   if (!editorDirty && key === editorCacheKey && mirrorEl) return true;
+  if (
+    mirrorEl &&
+    editorDirty &&
+    structural === mirrorStructuralKey &&
+    performance.now() - lastMirrorRebuildAt < MIRROR_REBUILD_MIN_MS
+  ) {
+    // 打字中：先复用旧测量，稍后强制重建（见 scheduleMirrorRebuild）
+    scheduleMirrorRebuild();
+    return true;
+  }
   editorDirty = false;
   editorCacheKey = key;
+  mirrorStructuralKey = structural;
+  lastMirrorRebuildAt = performance.now();
 
   if (!mirrorEl) {
     mirrorEl = document.createElement("div");

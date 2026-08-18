@@ -92,11 +92,11 @@ const renderer: RendererObject = {
     return `<pre><code${cls}>${body}</code></pre>`;
   },
 
-  // 链接：新窗口语义，交由前端拦截后调用系统浏览器打开
+  // 链接：新窗口语义，前端拦截后 Ctrl+点击 调用系统浏览器打开
   link({ href, title, tokens }: Tokens.Link): string {
     const text = this.parser.parseInline(tokens);
     const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
-    return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+    return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="ext-link"${titleAttr}>${text}</a>`;
   },
 
   // 图片：本地文件转为 asset 协议 URL 后加载
@@ -126,14 +126,18 @@ function renderWithLineInfo(src: string): string {
     return marked.parse(src, { async: false }) as string;
   }
   let offset = 0;
+  // 行号增量累计：统计每个块自身 raw 里的换行数，避免每个块都从头切分全文（O(n²) -> O(n)）
+  let line = 0;
   const parts: string[] = [];
   try {
     for (const token of tokens as Token[]) {
       const raw = token.raw ?? "";
       if (!raw) continue;
-      const line = src.slice(0, offset).split("\n").length - 1;
       const html = renderBlock(token, tokens);
       if (html) parts.push(injectLine(html, line));
+      for (let i = 0; i < raw.length; i++) {
+        if (raw.charCodeAt(i) === 10) line++;
+      }
       offset += raw.length;
     }
   } catch {

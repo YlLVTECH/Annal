@@ -32,7 +32,12 @@ import {
 } from "./editor";
 import { initHistory, openHistory } from "./history";
 import { initShortcuts } from "./shortcuts";
-import { initScrollSync, scheduleResync } from "./documentPosition";
+import {
+  initScrollSync,
+  notifyEditorActivity,
+  notifyPreviewLayoutChanged,
+  scheduleResync,
+} from "./documentPosition";
 import { initVirtualPreview, type PreviewApi } from "./virtualPreview";
 import {
   applyEdit,
@@ -794,19 +799,22 @@ window.addEventListener("DOMContentLoaded", async () => {
     (msg) => setStatus(msg),
   );
   // 预览虚拟化实例：块级渲染，只挂载视口附近的块
-  previewApi = initVirtualPreview(document.querySelector<HTMLElement>("#preview")!);
+  previewApi = initVirtualPreview(
+    document.querySelector<HTMLElement>("#preview")!,
+    notifyPreviewLayoutChanged,
+  );
 
   // 编辑器初始化（CodeMirror 6）：输入变更驱动块模型的增量更新与虚拟预览刷新
   initEditor({
     onEditChange: () => scheduleSave(),
     onDocChange: (range, text) => {
+      notifyEditorActivity();
       const changed = applyEdit(
         text,
         { start: range.start, end: range.end },
         { newlineChange: range.hasNewlineChange },
       );
       previewApi?.refresh(changed);
-      scheduleResync();
     },
     setPreviewVisible: (visible) => previewApi?.setVisible(visible),
     refreshPreview: () => {

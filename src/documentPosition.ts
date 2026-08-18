@@ -132,6 +132,11 @@ export function initScrollSync(deps: SyncDeps) {
   });
 }
 
+/** 编辑器发生输入时，后续布局校正必须以编辑区为同步源 */
+export function notifyEditorActivity() {
+  activeSide = "editor";
+}
+
 /** 拆分屏状态重新同步（视图切换、布局变化后调用） */
 export function scheduleResync() {
   if (!editorView || !previewApi || state.viewMode !== "split" || syncSuspended) return;

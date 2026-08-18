@@ -228,5 +228,41 @@ t = "你好";
 mod.applyEdit(t, { start: 0, end: 0 });
 ok(mod.getBlocks().length === 1, "空文档输入后出现一个块");
 
+/* 9. 末尾空行：完整行数独立于可渲染块范围 */
+console.log("9. 末尾空行");
+const trailingCases = [
+  { text: "正文", lines: 1, blockEnd: 0, trailing: 0 },
+  { text: "正文\n", lines: 2, blockEnd: 0, trailing: 1 },
+  { text: "正文\n\n", lines: 3, blockEnd: 0, trailing: 2 },
+  { text: "正文\n\n\n", lines: 4, blockEnd: 0, trailing: 3 },
+  { text: "正文\n   \n", lines: 3, blockEnd: 0, trailing: 2 },
+  { text: "\n", lines: 2, blockEnd: -1, trailing: 2 },
+  { text: "\n\n", lines: 3, blockEnd: -1, trailing: 3 },
+];
+for (const sample of trailingCases) {
+  mod.loadModel(sample.text);
+  const sampleBlocks = mod.getBlocks();
+  const lastEnd = sampleBlocks.length > 0 ? sampleBlocks[sampleBlocks.length - 1].endLine : -1;
+  const tailStart = lastEnd + 1;
+  ok(mod.getDocumentLineCount() === sample.lines, `完整行数正确 ${JSON.stringify(sample.text)}`);
+  ok(lastEnd === sample.blockEnd, `可渲染块末行正确 ${JSON.stringify(sample.text)}`);
+  ok(sample.lines - tailStart === sample.trailing, `尾区行数正确 ${JSON.stringify(sample.text)}`);
+}
+
+let trailingText = "正文";
+mod.loadModel(trailingText);
+for (let i = 1; i <= 3; i++) {
+  trailingText += "\n";
+  mod.applyEdit(trailingText, { start: i - 1, end: i - 1 }, { newlineChange: true });
+  ok(mod.getDocumentLineCount() === i + 1, `连续插入第 ${i} 个末尾换行`);
+}
+for (let i = 3; i >= 1; i--) {
+  trailingText = trailingText.slice(0, -1);
+  mod.applyEdit(trailingText, { start: i - 1, end: i }, { newlineChange: true });
+  ok(mod.getDocumentLineCount() === i, `连续删除第 ${i} 个末尾换行`);
+}
+mod.resetModel();
+ok(mod.getDocumentLineCount() === 1, "重置后文档行数恢复为 1");
+
 console.log(`\n结果: ${passed} 通过, ${failed} 失败`);
 process.exit(failed > 0 ? 1 : 0);

@@ -252,11 +252,13 @@ function fallbackBlocks(src: string): MdBlock[] {
 
 let nextBlockId = 1;
 let blocks: MdBlock[] = [];
+let documentLineCount = 1;
 /** 最近一次全量解析得到的文档级链接定义（增量重解析单个块时注入 lexer） */
 let docLinks: Record<string, Token> = {};
 
 /** 全量重解析（打开笔记 / 结构变化 / 兜底路径） */
 function fullParse(text: string) {
+  documentLineCount = countNewlines(text) + 1;
   let tokens: Token[] = [];
   try {
     tokens = marked.lexer(text) as Token[];
@@ -329,6 +331,7 @@ export function applyEdit(
   range: { start: number; end: number },
   opts?: { newlineChange?: boolean },
 ): Set<number> {
+  documentLineCount = countNewlines(text) + 1;
   const changed = new Set<number>();
   if (blocks.length === 0) {
     fullParse(text);
@@ -544,6 +547,11 @@ export function getBlocks(): MdBlock[] {
   return blocks;
 }
 
+/** 当前模型对应的完整文档行数（与 CodeMirror 的行数语义一致） */
+export function getDocumentLineCount(): number {
+  return documentLineCount;
+}
+
 /** 当前文本长度缓存（虚拟预览判断是否为空文档） */
 export function isModelEmpty(): boolean {
   return blocks.length === 0;
@@ -552,5 +560,6 @@ export function isModelEmpty(): boolean {
 /** 重置模型（关闭编辑器时清理） */
 export function resetModel() {
   blocks = [];
+  documentLineCount = 1;
   docLinks = {};
 }

@@ -1,26 +1,65 @@
+// 编辑器模块：基于 CodeMirror 6，替换原 textarea 实现。
+// - 视口渲染：50,000 行文档也只创建视口附近的行节点，原生滚动，无需全量 DOM。
+// - 撤销/重做、IME 组合输入、Tab 缩进、列表续行（Enter）均由 CM 内置处理。
+// - 输入一处内容只触发该处受影响 Markdown 块的重渲染（经 onDocChange 通知模型）。
+
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { renderMarkdown } from "./markdown";
 import { closeTablePopover } from "./table";
 import {
-  markEditorDirty,
-  markPreviewDirty,
-  scheduleResyncSplit,
-  setScrollSyncSuspended,
-  syncPreviewToEditor,
-} from "./scrollSync";
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  keymap,
+  lineNumbers,
+  placeholder,
+} from "@codemirror/view";
+import { Compartment, EditorState, Transaction, type ChangeSet, type Extension } from "@codemirror/state";
 import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+  redo as cmRedo,
+  undo as cmUndo,
+} from "@codemirror/commands";
+import { bracketMatching, indentUnit } from "@codemirror/language";
+import { insertNewlineContinueMarkup, markdown } from "@codemirror/lang-markdown";
+import { setScrollSyncSuspended, scheduleResync as scheduleSplitResync } from "./documentPosition";
+import {
+  IMAGE_EXT_RE,
   SPLIT_RATIO_DEFAULT,
   SPLIT_RATIO_MAX,
   SPLIT_RATIO_MIN,
-  currentPathOfSource,
-  IMAGE_EXT_RE,
   state,
 } from "./state";
 import { parseViewMode } from "./types";
-import type { EditSnapshot, ViewMode } from "./types";
+import type { ViewMode } from "./types";
 
-/* ---------- DOM 元素获取 ---------- */
+/* ---------- 依赖注入（由 main.ts 提供） ---------- */
+export interface EditorDeps {
+  /** 内容编辑后的回调（自动保存入口） */
+  onEditChange: () => void;
+  /** 文档变更回调：range 为 0 起始的源行闭区间；hasNewlineChange 表示本次编辑
+   *  插入或删除了换行（影响块边界，模型据此决定是否走全量重解析） */
+  onDocChange: (
+    range: { start: number; end: number; hasNewlineChange: boolean },
+    text: string,
+  ) => void;
+  /** 预览可见性控制（编辑模式隐藏） */
+  setPreviewVisible: (visible: boolean) => void;
+  /** 预览内容/布局刷新入口 */
+  refreshPreview: () => void;
+  /** 预览布局可能失效时重排 */
+  markPreviewLayoutDirty: () => void;
+  /** 预览容器元素（链接点击代理挂在这里） */
+  previewElement: HTMLElement;
+}
+
+let deps: EditorDeps | null = null;
+
+/* ---------- DOM 元素 ---------- */
 const editorHeaderEl = document.querySelector<HTMLDivElement>("#editor-header")!;
 const editorTitleEl = document.querySelector<HTMLSpanElement>("#editor-title")!;
 const missingBadgeEl = document.querySelector<HTMLSpanElement>("#editor-missing")!;
@@ -30,8 +69,7 @@ const toolbarEl = document.querySelector<HTMLDivElement>("#toolbar")!;
 const editorBodyEl = document.querySelector<HTMLDivElement>("#editor-body")!;
 const editorWrapEl = document.querySelector<HTMLDivElement>("#editor-wrap")!;
 const splitResizerEl = document.querySelector<HTMLDivElement>("#split-resizer")!;
-const editorEl = document.querySelector<HTMLTextAreaElement>("#editor")!;
-const previewEl = document.querySelector<HTMLDivElement>("#preview")!;
+const mountEl = document.querySelector<HTMLDivElement>("#editor")!;
 const statusbarEl = document.querySelector<HTMLDivElement>("#statusbar")!;
 const wordCountEl = document.querySelector<HTMLSpanElement>("#word-count")!;
 const commitNoteBtn = document.querySelector<HTMLButtonElement>("#commit-note-btn")!;
@@ -39,62 +77,79 @@ const saveAsNoteBtn = document.querySelector<HTMLButtonElement>("#save-as-note-b
 const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
 const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
 
-/* ---------- 撤销 / 重做状态 ---------- */
-const MAX_UNDO = 200;
-const MAX_UNDO_CHARS = 4 * 1024 * 1024;
+/* ---------- CodeMirror 视图与状态 ---------- */
+let view: EditorView | null = null;
+const readOnlyCompartment = new Compartment();
+const lineNumbersCompartment = new Compartment();
 
-let undoStack: EditSnapshot[] = [];
-let redoStack: EditSnapshot[] = [];
-let undoChars = 0;
-let redoChars = 0;
-let pendingSnapshot: EditSnapshot | null = null;
-let composing = false;
-let compositionSnapshot: EditSnapshot | null = null;
+/** 加载/切换文档时置位：该次变更不触发自动保存与预览增量更新 */
+let loadingDoc = false;
 
-/* ---------- 预览防抖与去重 ---------- */
-let previewTimer: number | undefined;
-let countTimer: number | undefined;
-let lastPreviewText = "";
-let lastPreviewBaseDir = "";
+const extensions: Extension[] = [
+  lineNumbersCompartment.of(lineNumbers()),
+  highlightActiveLine(),
+  history(),
+  drawSelection(),
+  dropCursor(),
+  EditorView.lineWrapping,
+  bracketMatching(),
+  indentUnit.of("  "),
+  markdown(),
+  placeholder("开始输入…"),
+  readOnlyCompartment.of(EditorState.readOnly.of(false)),
+  EditorView.contentAttributes.of({
+    spellcheck: "false",
+    autocapitalize: "off",
+    autocomplete: "off",
+  }),
+  // 键位优先级：后声明的 keymap 优先。Enter 续行绑定放最后（最高优先），
+  // 其次 Shift+Tab/Tab 缩进；默认键位与历史键位在前。
+  keymap.of(defaultKeymap),
+  keymap.of(historyKeymap),
+  keymap.of([indentWithTab]),
+  keymap.of([{ key: "Enter", run: insertNewlineContinueMarkup }]),
+  EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    if (loadingDoc) return;
+    onDocChanged(update.changes, update.startState, update.state);
+    deps?.onEditChange();
+    scheduleCount();
+  }),
+  EditorView.domEventHandlers({ paste: handlePaste }),
+];
 
-let onEditChangeCallback: (() => void) | null = null;
-
-export function getEditorElement(): HTMLTextAreaElement {
-  return editorEl;
-}
-
-export function getPreviewElement(): HTMLDivElement {
-  return previewEl;
-}
-
-export function isComposing(): boolean {
-  return composing;
-}
-
-export function canEditCurrent(): boolean {
-  return Boolean(state.current) && state.viewMode !== "preview" && !editorBodyEl.hidden;
-}
-
-function sameSource(a: typeof state.current, b: typeof state.current): boolean {
-  if (!a || !b) return false;
-  if (a.kind === "note" && b.kind === "note") return a.id === b.id;
-  if (a.kind === "file" && b.kind === "file") return a.path === b.path;
-  return false;
-}
-
-function syncEditingState() {
-  const readOnly = state.viewMode === "preview";
-  editorEl.readOnly = readOnly;
-  for (const button of toolButtons) button.disabled = readOnly || !state.current;
-  if (readOnly) {
-    pendingSnapshot = null;
-    compositionSnapshot = null;
-    composing = false;
-    closeTablePopover();
-    editorEl.blur();
+function onDocChanged(
+  changes: ChangeSet,
+  startState: EditorState,
+  newState: EditorState,
+) {
+  let minLine = Number.POSITIVE_INFINITY;
+  let maxLine = -1;
+  let hasNewlineChange = false;
+  changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    const oldSeg = startState.sliceDoc(fromA, toA);
+    const newSeg = newState.sliceDoc(fromB, toB);
+    if (oldSeg.includes("\n") || newSeg.includes("\n")) hasNewlineChange = true;
+    const a = startState.doc.lineAt(Math.min(fromA, startState.doc.length)).number - 1;
+    const b = newState.doc.lineAt(Math.min(Math.max(toB, 1), newState.doc.length)).number - 1;
+    if (a < minLine) minLine = a;
+    if (b > maxLine) maxLine = b;
+  });
+  if (minLine === Number.POSITIVE_INFINITY) {
+    minLine = 0;
+    maxLine = newState.doc.lines - 1;
+  } else {
+    // 前后各多带一行：结构变化（如输入 ``` 开围栏）会影响相邻块的归属
+    minLine = Math.max(0, minLine - 1);
+    maxLine = Math.min(newState.doc.lines - 1, maxLine + 1);
   }
+  deps?.onDocChange(
+    { start: minLine, end: maxLine, hasNewlineChange },
+    newState.doc.toString(),
+  );
 }
 
+/* ---------- 预览与保存状态 ---------- */
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export function setSaveStatus(status: SaveStatus, text = "") {
@@ -108,67 +163,54 @@ export function setStatus(text: string) {
   if (text) savedStatusEl.dataset.status = "idle";
 }
 
-export function snapshotOf(): EditSnapshot {
-  return {
-    value: editorEl.value,
-    start: editorEl.selectionStart ?? 0,
-    end: editorEl.selectionEnd ?? 0,
-  };
+export function resetSaveStatus() {
+  setSaveStatus("idle");
 }
 
-function pushHistory(stack: EditSnapshot[], snap: EditSnapshot, chars: number): number {
-  stack.push(snap);
-  chars += snap.value.length;
-  while (stack.length > MAX_UNDO || chars > MAX_UNDO_CHARS) {
-    chars -= stack.shift()!.value.length;
-  }
-  return chars;
+/* ---------- 文本与选区访问 ---------- */
+export function getEditorView(): EditorView {
+  if (!view) throw new Error("editor not initialized");
+  return view;
 }
 
-export function pushUndo(snap: EditSnapshot) {
-  if (snap.value === editorEl.value) return;
-  redoStack.length = 0;
-  redoChars = 0;
-  undoChars = pushHistory(undoStack, snap, undoChars);
+export function getEditorText(): string {
+  return view ? view.state.doc.toString() : "";
 }
 
-export function applySnapshot(snap: EditSnapshot) {
-  editorEl.value = snap.value;
-  const len = snap.value.length;
-  editorEl.setSelectionRange(Math.min(snap.start, len), Math.min(snap.end, len));
-  editorEl.focus();
-  afterEdit();
+export function getSelectedText(): string {
+  if (!view) return "";
+  const { from, to } = view.state.selection.main;
+  return view.state.sliceDoc(from, to);
 }
 
+export function editorHasFocus(): boolean {
+  return view ? view.hasFocus : false;
+}
+
+export function canEditCurrent(): boolean {
+  return Boolean(state.current) && state.viewMode !== "preview" && !editorBodyEl.hidden;
+}
+
+export function isComposing(): boolean {
+  return view ? view.composing : false;
+}
+
+/* ---------- 撤销 / 重做（CM 内置历史，按事务分组） ---------- */
 export function undo() {
-  if (!canEditCurrent()) return;
-  const snap = undoStack.pop();
-  if (!snap) return;
-  undoChars = Math.max(0, undoChars - snap.value.length);
-  redoChars = pushHistory(redoStack, snapshotOf(), redoChars);
-  applySnapshot(snap);
+  if (!view || !canEditCurrent()) return;
+  cmUndo(view);
 }
 
 export function redo() {
-  if (!canEditCurrent()) return;
-  const snap = redoStack.pop();
-  if (!snap) return;
-  redoChars = Math.max(0, redoChars - snap.value.length);
-  undoChars = pushHistory(undoStack, snapshotOf(), undoChars);
-  applySnapshot(snap);
+  if (!view || !canEditCurrent()) return;
+  cmRedo(view);
 }
 
-export function resetHistory() {
-  undoStack.length = 0;
-  redoStack.length = 0;
-  undoChars = 0;
-  redoChars = 0;
-  pendingSnapshot = null;
-  compositionSnapshot = null;
-}
+/* ---------- 字数统计 ---------- */
+let countTimer: number | undefined;
 
 export function updateCount() {
-  const text = editorEl.value;
+  const text = getEditorText();
   const chars = text.replace(/\s/g, "").length;
   const words = (text.match(/[A-Za-z0-9_]+/g) ?? []).length;
   const minutes = text.trim().length === 0 ? 0 : Math.max(1, Math.ceil(chars / 400));
@@ -183,41 +225,7 @@ function scheduleCount() {
   countTimer = window.setTimeout(updateCount, 250);
 }
 
-export function resetSaveStatus() {
-  setSaveStatus("idle");
-}
-
-export function renderPreview() {
-  const text = editorEl.value;
-  const baseDir = currentPathOfSource();
-  if (text === lastPreviewText && baseDir === lastPreviewBaseDir && previewEl.innerHTML !== "") {
-    return;
-  }
-  lastPreviewText = text;
-  lastPreviewBaseDir = baseDir;
-  previewEl.innerHTML = text.trim()
-    ? renderMarkdown(text, baseDir)
-    : '<div class="preview-empty">暂无内容，预览将显示在这里</div>';
-  markPreviewDirty();
-  // 分屏下重新渲染后按编辑区当前位置重新锚定，而不是维持旧的比例（会导致漂移）
-  if (state.viewMode === "split") syncPreviewToEditor();
-}
-
-export function schedulePreview() {
-  if (state.viewMode === "edit") return;
-  window.clearTimeout(previewTimer);
-  previewTimer = window.setTimeout(renderPreview, 120);
-}
-
-export function afterEdit() {
-  markEditorDirty();
-  if (onEditChangeCallback) {
-    onEditChangeCallback();
-  }
-  schedulePreview();
-  scheduleCount();
-}
-
+/* ---------- 视图模式 ---------- */
 export function setViewMode(value: unknown) {
   const mode = parseViewMode(value);
   state.viewMode = mode;
@@ -229,18 +237,47 @@ export function setViewMode(value: unknown) {
   if (mode === "split") applySplitRatio(state.splitRatio);
   else editorWrapEl.style.removeProperty("flex-basis");
   syncEditingState();
-  if (mode !== "edit") renderPreview();
-  if (mode === "split") scheduleResyncSplit();
-  if (mode !== "preview") editorEl.focus();
+  if (view) {
+    view.dispatch({
+      effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(mode === "preview")),
+    });
+  }
+  deps?.setPreviewVisible(mode !== "edit");
+  if (mode !== "edit") deps?.refreshPreview();
+  if (mode === "split") scheduleSplitResync();
+  if (mode !== "preview" && view && !view.hasFocus) view.focus();
 }
 
 export function getViewMode(): ViewMode {
   return state.viewMode;
 }
 
+export function setLineNumbersEnabled(enabled: boolean) {
+  if (!view) return;
+  view.dispatch({
+    effects: lineNumbersCompartment.reconfigure(enabled ? lineNumbers() : []),
+  });
+}
+
+function syncEditingState() {
+  const readOnly = state.viewMode === "preview";
+  for (const button of toolButtons) button.disabled = readOnly || !state.current;
+  if (readOnly) {
+    closeTablePopover();
+    view?.contentDOM.blur();
+  }
+}
+
+/* ---------- 打开 / 关闭编辑器 ---------- */
 export function showEditor(title: string, content: string, pathHint = "") {
-  editorEl.value = content;
-  resetHistory();
+  const v = getEditorView();
+  loadingDoc = true;
+  try {
+    v.setState(EditorState.create({ doc: content, extensions }));
+  } finally {
+    loadingDoc = false;
+  }
+  v.scrollDOM.scrollTop = 0;
   editorBodyEl.hidden = false;
   editorHeaderEl.hidden = false;
   toolbarEl.hidden = false;
@@ -249,13 +286,11 @@ export function showEditor(title: string, content: string, pathHint = "") {
   syncEditingState();
   editorTitleEl.textContent = title;
   editorTitleEl.title = pathHint || title;
-  editorEl.scrollTop = 0;
-  previewEl.scrollTop = 0;
-  markEditorDirty();
-  renderPreview();
+  deps?.setPreviewVisible(state.viewMode !== "edit");
+  deps?.refreshPreview();
   updateCount();
   setSaveStatus("idle", "");
-  if (state.viewMode !== "preview") editorEl.focus();
+  if (state.viewMode !== "preview") v.focus();
 }
 
 export function closeEditor() {
@@ -264,17 +299,23 @@ export function closeEditor() {
   syncEditingState();
   commitNoteBtn.hidden = true;
   saveAsNoteBtn.hidden = true;
-  editorEl.value = "";
-  resetHistory();
-  editorEl.hidden = false;
+  loadingDoc = true;
+  try {
+    const v = getEditorView();
+    v.dispatch({
+      changes: { from: 0, to: v.state.doc.length, insert: "" },
+      annotations: Transaction.addToHistory.of(false),
+    });
+  } finally {
+    loadingDoc = false;
+  }
+  deps?.setPreviewVisible(false);
+  deps?.refreshPreview();
   editorBodyEl.hidden = true;
   editorHeaderEl.hidden = true;
   toolbarEl.hidden = true;
   statusbarEl.hidden = true;
   editorEmptyEl.hidden = false;
-  previewEl.innerHTML = "";
-  lastPreviewText = "";
-  lastPreviewBaseDir = "";
   wordCountEl.textContent = "";
   setSaveStatus("idle", "");
 }
@@ -288,93 +329,103 @@ export function updateMissingBadge(gone: boolean, isFile: boolean) {
   }
 }
 
-/* ---------- 选区包裹与插入动作 ---------- */
+/* ---------- 输入辅助（均为单事务，撤销一步到位；事务经 updateListener 生效） ---------- */
 
-export function wrapSelection(before: string, after: string, placeholder: string) {
+export function wrapSelection(before: string, after: string, placeholderText: string) {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const sel = value.slice(s, e) || placeholder;
-  ta.value = value.slice(0, s) + before + sel + after + value.slice(e);
-  const ns = s + before.length;
-  ta.setSelectionRange(ns, ns + sel.length);
-  ta.focus();
-  afterEdit();
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const selected = v.state.sliceDoc(from, to) || placeholderText;
+  const text = before + selected + after;
+  v.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + before.length, head: from + before.length + selected.length },
+    scrollIntoView: true,
+  });
+  v.focus();
 }
 
-export function prefixLines(prefix: string, placeholder: string) {
+export function prefixLines(prefix: string, placeholderText: string) {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const lineStart = value.lastIndexOf("\n", s - 1) + 1;
-  let lineEnd = value.indexOf("\n", e);
-  if (lineEnd === -1) lineEnd = value.length;
-  const block = value.slice(lineStart, lineEnd);
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const lineStart = v.state.doc.lineAt(from).from;
+  const lineEnd = v.state.doc.lineAt(to).to;
+  const block = v.state.sliceDoc(lineStart, lineEnd);
 
   if (!block.trim()) {
-    const insert = prefix + placeholder;
-    ta.value = value.slice(0, lineStart) + insert + value.slice(lineEnd);
-    ta.setSelectionRange(lineStart + prefix.length, lineStart + insert.length);
+    const insert = prefix + placeholderText;
+    v.dispatch({
+      changes: { from: lineStart, to: lineEnd, insert },
+      selection: { anchor: lineStart + prefix.length, head: lineStart + insert.length },
+    });
   } else {
     const out = block
       .split("\n")
       .map((l) => (l.trim() ? prefix + l : l))
       .join("\n");
-    ta.value = value.slice(0, lineStart) + out + value.slice(lineEnd);
-    ta.setSelectionRange(lineStart + prefix.length, lineStart + prefix.length);
+    v.dispatch({
+      changes: { from: lineStart, to: lineEnd, insert: out },
+      selection: { anchor: lineStart + prefix.length, head: lineStart + prefix.length },
+    });
   }
-  ta.focus();
-  afterEdit();
+  v.focus();
 }
 
 export function insertBlock(text: string) {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const before = value.slice(0, s);
-  const after = value.slice(e);
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const before = v.state.sliceDoc(0, from);
+  const after = v.state.sliceDoc(to);
   const needBefore = before.length > 0 && !before.endsWith("\n\n");
   const needAfter = after.length > 0 && !after.startsWith("\n\n");
   const ins = (needBefore ? "\n\n" : "") + text + (needAfter ? "\n\n" : "");
-  ta.value = before + ins + after;
-  const pos = s + ins.length - (needAfter ? 2 : 0);
-  ta.setSelectionRange(pos, pos);
-  ta.focus();
-  afterEdit();
+  const pos = from + ins.length - (needAfter ? 2 : 0);
+  v.dispatch({
+    changes: { from, to, insert: ins },
+    selection: { anchor: pos, head: pos },
+    scrollIntoView: true,
+  });
+  v.focus();
 }
 
 export function insertCodeBlock() {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const sel = value.slice(s, e).trim() || "代码";
-  const before = value.slice(0, s);
-  const after = value.slice(e);
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const selected = v.state.sliceDoc(from, to).trim() || "代码";
+  const before = v.state.sliceDoc(0, from);
+  const after = v.state.sliceDoc(to);
   const needBefore = before.length > 0 && !before.endsWith("\n\n");
   const needAfter = after.length > 0 && !after.startsWith("\n\n");
-  const ins = (needBefore ? "\n\n" : "") + "```\n" + sel + "\n```" + (needAfter ? "\n\n" : "");
-  ta.value = before + ins + after;
-  const bodyStart = s + (needBefore ? 2 : 0) + 4;
-  ta.setSelectionRange(bodyStart, bodyStart + sel.length);
-  ta.focus();
-  afterEdit();
+  const ins = (needBefore ? "\n\n" : "") + "```\n" + selected + "\n```" + (needAfter ? "\n\n" : "");
+  const bodyStart = from + (needBefore ? 2 : 0) + 4;
+  v.dispatch({
+    changes: { from, to, insert: ins },
+    selection: { anchor: bodyStart, head: bodyStart + selected.length },
+    scrollIntoView: true,
+  });
+  v.focus();
 }
 
 export function insertLink() {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const sel = value.slice(s, e).trim();
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const selected = v.state.sliceDoc(from, to).trim();
   const isUrl =
-    /^https?:\/\/\S+$/.test(sel) || /^(?:\w+\.)+\w+(?::\d+)?(?:\/\S*)?$/.test(sel);
-  const text = isUrl ? sel : sel || "链接文本";
-  const url = isUrl ? (sel.startsWith("http") ? sel : `https://${sel}`) : "https://";
+    /^https?:\/\/\S+$/.test(selected) || /^(?:\w+\.)+\w+(?::\d+)?(?:\/\S*)?$/.test(selected);
+  const text = isUrl ? selected : selected || "链接文本";
+  const url = isUrl ? (selected.startsWith("http") ? selected : `https://${selected}`) : "https://";
   const ins = `[${text}](${url})`;
-  ta.value = value.slice(0, s) + ins + value.slice(e);
-  const urlStart = s + ins.indexOf("(") + 1;
-  ta.setSelectionRange(urlStart, urlStart + url.length);
-  ta.focus();
-  afterEdit();
+  const urlStart = from + ins.indexOf("(") + 1;
+  v.dispatch({
+    changes: { from, to, insert: ins },
+    selection: { anchor: urlStart, head: urlStart + url.length },
+    scrollIntoView: true,
+  });
+  v.focus();
 }
 
 export async function insertImage() {
@@ -406,19 +457,20 @@ export async function insertImage() {
 
 export function applyTableTextToEditor(text: string, firstCellStart: number, firstCellLen: number) {
   if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const before = value.slice(0, s);
-  const after = value.slice(e);
+  const v = getEditorView();
+  const { from, to } = v.state.selection.main;
+  const before = v.state.sliceDoc(0, from);
+  const after = v.state.sliceDoc(to);
   const needBefore = before.length > 0 && !before.endsWith("\n\n");
   const needAfter = after.length > 0 && !after.startsWith("\n\n");
   const ins = (needBefore ? "\n\n" : "") + text + (needAfter ? "\n\n" : "");
-  pushUndo(snapshotOf());
-  ta.value = before + ins + after;
-  const cellStart = s + (needBefore ? 2 : 0) + firstCellStart;
-  ta.setSelectionRange(cellStart, cellStart + firstCellLen);
-  ta.focus();
-  afterEdit();
+  const cellStart = from + (needBefore ? 2 : 0) + firstCellStart;
+  v.dispatch({
+    changes: { from, to, insert: ins },
+    selection: { anchor: cellStart, head: cellStart + firstCellLen },
+    scrollIntoView: true,
+  });
+  v.focus();
 }
 
 export function runCommand(cmd: string, onTableToggle?: () => void) {
@@ -427,7 +479,6 @@ export function runCommand(cmd: string, onTableToggle?: () => void) {
     if (onTableToggle) onTableToggle();
     return;
   }
-  pushUndo(snapshotOf());
   switch (cmd) {
     case "h1":
       prefixLines("# ", "标题");
@@ -477,149 +528,41 @@ export function runCommand(cmd: string, onTableToggle?: () => void) {
   }
 }
 
-/* ---------- 编辑器键盘增强功能 (Tab缩进/列表续行/URL智能粘贴) ---------- */
+/* ---------- 粘贴处理（URL 转链接 + 图片落盘插入） ---------- */
 
-function handleTabKey(e: KeyboardEvent) {
-  if (!canEditCurrent()) return;
-  e.preventDefault();
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: ePos, value } = ta;
-  pushUndo(snapshotOf());
-
-  const isShift = e.shiftKey;
-  const lineStart = value.lastIndexOf("\n", s - 1) + 1;
-  let lineEnd = value.indexOf("\n", ePos);
-  if (lineEnd === -1) lineEnd = value.length;
-
-  if (s === ePos && !isShift) {
-    // 光标单点按 Tab：插入 2 个空格
-    ta.value = value.slice(0, s) + "  " + value.slice(s);
-    ta.setSelectionRange(s + 2, s + 2);
-  } else {
-    // 多行选区或 Shift+Tab 反缩进
-    const selectedBlock = value.slice(lineStart, lineEnd);
-    const lines = selectedBlock.split("\n");
-    let changedLen = 0;
-    const modifiedLines = lines.map((line) => {
-      if (isShift) {
-        if (line.startsWith("  ")) {
-          changedLen -= 2;
-          return line.slice(2);
-        } else if (line.startsWith("\t") || line.startsWith(" ")) {
-          changedLen -= 1;
-          return line.slice(1);
-        }
-        return line;
-      } else {
-        changedLen += 2;
-        return "  " + line;
-      }
-    });
-
-    const newBlock = modifiedLines.join("\n");
-    ta.value = value.slice(0, lineStart) + newBlock + value.slice(lineEnd);
-    ta.setSelectionRange(lineStart, lineEnd + changedLen);
-  }
-  afterEdit();
-}
-
-function handleEnterKey(e: KeyboardEvent): boolean {
-  if (!canEditCurrent()) return false;
-  const ta = editorEl;
-  const { selectionStart: s, value } = ta;
-  const lineStart = value.lastIndexOf("\n", s - 1) + 1;
-  const currentLine = value.slice(lineStart, s);
-
-  // 匹配列表正则：无序 (-/*)、有序 (1.)、任务 (- [ ] / - [x])
-  const taskMatch = currentLine.match(/^(\s*)([-*+]\s+\[[ xX]\]\s+)(.*)$/);
-  const olMatch = currentLine.match(/^(\s*)(\d+)(\.\s+)(.*)$/);
-  const ulMatch = currentLine.match(/^(\s*)([-*+]\s+)(.*)$/);
-
-  if (taskMatch) {
-    e.preventDefault();
-    pushUndo(snapshotOf());
-    const [_, indent, _prefix, rest] = taskMatch;
-    if (!rest.trim()) {
-      // 空列表项回车：清除该行前缀并退回普通换行
-      ta.value = value.slice(0, lineStart) + value.slice(s);
-      ta.setSelectionRange(lineStart, lineStart);
-    } else {
-      const nextPrefix = `\n${indent}- [ ] `;
-      ta.value = value.slice(0, s) + nextPrefix + value.slice(s);
-      ta.setSelectionRange(s + nextPrefix.length, s + nextPrefix.length);
+function handlePaste(e: ClipboardEvent, v: EditorView): boolean {
+  if (!canEditCurrent() || e.clipboardData == null) return false;
+  const text = e.clipboardData.getData("text")?.trim();
+  const sel = v.state.selection.main;
+  if (text && !sel.empty) {
+    const isUrl =
+      /^https?:\/\/\S+$/i.test(text) || /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?::\d+)?(?:\/\S*)?$/i.test(text);
+    if (isUrl) {
+      e.preventDefault();
+      const selected = v.state.sliceDoc(sel.from, sel.to);
+      const validUrl = text.startsWith("http") ? text : `https://${text}`;
+      const md = `[${selected}](${validUrl})`;
+      v.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: md },
+        selection: { anchor: sel.from + md.length },
+        scrollIntoView: true,
+      });
+      return true;
     }
-    afterEdit();
+  }
+  const items = Array.from(e.clipboardData.items ?? []);
+  if (items.some((it) => it.type.startsWith("image/"))) {
+    e.preventDefault();
+    void handlePasteImage(e, v);
     return true;
   }
-
-  if (olMatch) {
-    e.preventDefault();
-    pushUndo(snapshotOf());
-    const [_, indent, numStr, dot, rest] = olMatch;
-    if (!rest.trim()) {
-      ta.value = value.slice(0, lineStart) + value.slice(s);
-      ta.setSelectionRange(lineStart, lineStart);
-    } else {
-      const nextNum = parseInt(numStr, 10) + 1;
-      const nextPrefix = `\n${indent}${nextNum}${dot}`;
-      ta.value = value.slice(0, s) + nextPrefix + value.slice(s);
-      ta.setSelectionRange(s + nextPrefix.length, s + nextPrefix.length);
-    }
-    afterEdit();
-    return true;
-  }
-
-  if (ulMatch) {
-    e.preventDefault();
-    pushUndo(snapshotOf());
-    const [_, indent, prefix, rest] = ulMatch;
-    if (!rest.trim()) {
-      ta.value = value.slice(0, lineStart) + value.slice(s);
-      ta.setSelectionRange(lineStart, lineStart);
-    } else {
-      const nextPrefix = `\n${indent}${prefix}`;
-      ta.value = value.slice(0, s) + nextPrefix + value.slice(s);
-      ta.setSelectionRange(s + nextPrefix.length, s + nextPrefix.length);
-    }
-    afterEdit();
-    return true;
-  }
-
   return false;
 }
 
-function handlePasteUrl(e: ClipboardEvent) {
-  if (!canEditCurrent()) return;
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: ePos, value } = ta;
-  if (s === ePos) return; // 无选中文本正常粘贴
-
-  const pastedText = e.clipboardData?.getData("text")?.trim();
-  if (!pastedText) return;
-
-  const isUrl =
-    /^https?:\/\/\S+$/i.test(pastedText) ||
-    /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?::\d+)?(?:\/\S*)?$/i.test(pastedText);
-
-  if (isUrl) {
-    e.preventDefault();
-    pushUndo(snapshotOf());
-    const selected = value.slice(s, ePos);
-    const validUrl = pastedText.startsWith("http") ? pastedText : `https://${pastedText}`;
-    const mdLink = `[${selected}](${validUrl})`;
-    ta.value = value.slice(0, s) + mdLink + value.slice(ePos);
-    const newPos = s + mdLink.length;
-    ta.setSelectionRange(newPos, newPos);
-    afterEdit();
-  }
-}
-
-async function handlePasteImage(e: ClipboardEvent) {
-  if (!canEditCurrent()) return;
+async function handlePasteImage(e: ClipboardEvent, v: EditorView) {
   const items = Array.from(e.clipboardData?.items ?? []);
   const imageItems = items.filter((it) => it.type.startsWith("image/"));
   if (imageItems.length === 0) return;
-  e.preventDefault();
   const inserted: string[] = [];
   let failed = 0;
   for (const item of imageItems) {
@@ -631,95 +574,45 @@ async function handlePasteImage(e: ClipboardEvent) {
     const fileName = `Pasted-${stamp}.${safeExt}`;
     try {
       const data = new Uint8Array(await file.arrayBuffer());
-      const path = await invoke<string>("save_pasted_image", {
-        fileName,
-        data,
-      });
+      const path = await invoke<string>("save_pasted_image", { fileName, data });
       inserted.push(`![${fileName}](${path.replace(/\\/g, "/")})`);
     } catch {
-      // 单张图片失败不影响其余，但要在状态栏给出可见提示
       failed++;
     }
+  }
+  if (!canEditCurrent()) {
+    if (failed > 0) setStatus(`图片粘贴失败：${failed} 张图片未能保存`);
+    return;
   }
   if (inserted.length === 0) {
     if (failed > 0) setStatus(`图片粘贴失败：${failed} 张图片未能保存`);
     return;
   }
   const text = inserted.join("\n\n");
-  const ta = editorEl;
-  const { selectionStart: s, selectionEnd: ePos, value } = ta;
-  ta.value = value.slice(0, s) + text + value.slice(ePos);
-  ta.setSelectionRange(s + text.length, s + text.length);
-  ta.focus();
-  afterEdit();
+  const { from, to } = v.state.selection.main;
+  v.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+    scrollIntoView: true,
+  });
   if (failed > 0) setStatus(`已插入 ${inserted.length} 张图片，${failed} 张保存失败`);
 }
 
-export function initEditor(onEditChange: () => void) {
-  onEditChangeCallback = onEditChange;
+/* ---------- 生命周期 ---------- */
+
+export function initEditor(editorDeps: EditorDeps) {
+  deps = editorDeps;
 
   initSplitResizer();
 
-  editorEl.addEventListener("beforeinput", (e) => {
-    if (!canEditCurrent()) {
-      e.preventDefault();
-      pendingSnapshot = null;
-      return;
-    }
-    if (e.inputType === "historyUndo") {
-      e.preventDefault();
-      if (!composing) undo();
-      return;
-    }
-    if (e.inputType === "historyRedo") {
-      e.preventDefault();
-      if (!composing) redo();
-      return;
-    }
-    if (composing) return;
-    pendingSnapshot = snapshotOf();
+  view = new EditorView({
+    parent: mountEl,
+    state: EditorState.create({ doc: "", extensions }),
   });
-
-  editorEl.addEventListener("compositionstart", () => {
-    if (!canEditCurrent()) return;
-    composing = true;
-    pendingSnapshot = null;
-    compositionSnapshot = snapshotOf();
-  });
-
-  editorEl.addEventListener("compositionend", () => {
-    composing = false;
-    const snap = compositionSnapshot;
-    compositionSnapshot = null;
-    pendingSnapshot = null;
-    if (snap && snap.value !== editorEl.value) pushUndo(snap);
-  });
-
-  editorEl.addEventListener("input", () => {
-    if (!canEditCurrent()) return;
-    if (!composing && pendingSnapshot) {
-      pushUndo(pendingSnapshot);
-      pendingSnapshot = null;
-    }
-    afterEdit();
-  });
-
-  editorEl.addEventListener("keydown", (e) => {
-    if (composing) return;
-    if (e.key === "Tab") {
-      handleTabKey(e);
-      return;
-    }
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !composing) {
-      if (handleEnterKey(e)) return;
-    }
-  });
-
-  editorEl.addEventListener("paste", handlePasteUrl);
-  editorEl.addEventListener("paste", handlePasteImage);
 
   // 预览区链接点击：按住 Ctrl 时才调用系统浏览器打开，否则保持默认行为
-  previewEl.addEventListener("click", async (e) => {
+  const root = editorDeps.previewElement;
+  root.addEventListener("click", async (e) => {
     const a = (e.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[href]");
     if (!a) return;
     const href = a.getAttribute("href");
@@ -732,6 +625,13 @@ export function initEditor(onEditChange: () => void) {
       window.open(href, "_blank");
     }
   });
+}
+
+function sameSource(a: typeof state.current, b: typeof state.current): boolean {
+  if (!a || !b) return false;
+  if (a.kind === "note" && b.kind === "note") return a.id === b.id;
+  if (a.kind === "file" && b.kind === "file") return a.path === b.path;
+  return false;
 }
 
 /* ---------- 分屏分割条拖拽 ---------- */
@@ -762,7 +662,7 @@ export function initSplitResizer() {
   applySplitRatio(state.splitRatio);
   new ResizeObserver(() => {
     scheduleSplitLayout();
-    scheduleResyncSplit();
+    scheduleSplitResync();
   }).observe(editorBodyEl);
 
   splitResizerEl.addEventListener("pointerdown", (e) => {
@@ -792,7 +692,7 @@ export function initSplitResizer() {
       }
       localStorage.setItem("notebook:split-ratio", String(state.splitRatio));
       setScrollSyncSuspended(false);
-      scheduleResyncSplit();
+      scheduleSplitResync();
     };
 
     splitResizerEl.addEventListener("pointermove", onMove);
@@ -803,6 +703,6 @@ export function initSplitResizer() {
   splitResizerEl.addEventListener("dblclick", () => {
     applySplitRatio(SPLIT_RATIO_DEFAULT);
     localStorage.setItem("notebook:split-ratio", String(SPLIT_RATIO_DEFAULT));
-    scheduleResyncSplit();
+    scheduleSplitResync();
   });
 }

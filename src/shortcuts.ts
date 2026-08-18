@@ -1,5 +1,5 @@
 import { handleDialogEscape } from "./dialogs";
-import { canEditCurrent, isComposing, redo, runCommand, setViewMode, undo } from "./editor";
+import { canEditCurrent, isComposing, runCommand, setViewMode } from "./editor";
 import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "./history";
 import { setSidebarHidden } from "./sidebar";
 import { state } from "./state";
@@ -9,7 +9,8 @@ export interface ShortcutHandlers {
   onNewNote: () => void;
   onOpenFile: () => void;
   onFlushSave: () => Promise<void>;
-  getEditorElement: () => HTMLTextAreaElement;
+  /** CodeMirror 编辑器是否获得焦点（决定 Ctrl+B/I/K 是否作用于编辑器） */
+  editorHasFocus: () => boolean;
 }
 
 export function initShortcuts(handlers: ShortcutHandlers) {
@@ -76,25 +77,18 @@ export function initShortcuts(handlers: ShortcutHandlers) {
       return;
     }
 
-    const editorEl = handlers.getEditorElement();
-    if (document.activeElement !== editorEl || !canEditCurrent()) return;
+    const editorActive = handlers.editorHasFocus();
+    if (!editorActive || !canEditCurrent()) return;
 
-    if (mod && !isComposing() && k === "z" && !e.shiftKey) {
-      e.preventDefault();
-      undo();
-    } else if (mod && !isComposing() && (k === "y" || (k === "z" && e.shiftKey))) {
-      e.preventDefault();
-      redo();
-    } else if (mod && k === "b") {
-      if (isComposing()) return;
+    // 撤销/重做（Ctrl+Z/Y）：由 CodeMirror 内置历史处理，全局不拦截；
+    // 视图切换键位已在上方处理。这里补充 CM 默认键位未绑定的格式快捷键。
+    if (mod && !isComposing() && k === "b") {
       e.preventDefault();
       runCommand("bold");
-    } else if (mod && k === "i") {
-      if (isComposing()) return;
+    } else if (mod && !isComposing() && k === "i") {
       e.preventDefault();
       runCommand("italic");
     } else if (mod && k === "k") {
-      if (isComposing()) return;
       e.preventDefault();
       runCommand("link");
     }

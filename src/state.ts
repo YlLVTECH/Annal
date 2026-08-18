@@ -28,7 +28,6 @@ export const state = {
   query: "",
   viewMode: parseViewMode(localStorage.getItem("notebook:view")),
   contentDensity: readContentDensity(),
-  focusMode: localStorage.getItem("notebook:focus") === "1",
   sidebarWidth: Number(localStorage.getItem("notebook:sidebar-width")) || SIDEBAR_DEFAULT_WIDTH,
   sidebarHidden: localStorage.getItem("notebook:sidebar") === "hidden",
   splitRatio: Number(localStorage.getItem("notebook:split-ratio")) || SPLIT_RATIO_DEFAULT,

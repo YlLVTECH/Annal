@@ -14,8 +14,6 @@ const sidebarEl = document.querySelector<HTMLElement>("#sidebar")!;
 const resizerEl = document.querySelector<HTMLDivElement>("#sidebar-resizer")!;
 const sidebarCollapseBtn = document.querySelector<HTMLButtonElement>("#sidebar-collapse")!;
 const sidebarExpandBtn = document.querySelector<HTMLButtonElement>("#sidebar-expand")!;
-const focusToggleBtn = document.querySelector<HTMLButtonElement>("#focus-toggle")!;
-const focusExitBtn = document.querySelector<HTMLButtonElement>("#focus-exit")!;
 const noteListEl = document.querySelector<HTMLUListElement>("#note-list")!;
 const emptyHintEl = document.querySelector<HTMLDivElement>("#empty-hint")!;
 const searchInputEl = document.querySelector<HTMLInputElement>("#search-input")!;
@@ -38,7 +36,7 @@ let onContextMenuCallback: ((e: MouseEvent) => void) | null = null;
 let onBatchDeleteCallback: ((ids: string[]) => Promise<void>) | null = null;
 let onBatchExportCallback: ((ids: string[]) => Promise<void>) | null = null;
 
-/* ---------- 侧栏宽度 / 折叠 / 专注模式 ---------- */
+/* ---------- 侧栏宽度 / 折叠 ---------- */
 
 export function applySidebarWidth(width: number) {
   state.sidebarWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
@@ -54,14 +52,6 @@ export function setSidebarHidden(hidden: boolean) {
 
 export function setResponsiveSidebarHidden(hidden: boolean) {
   document.body.classList.toggle("sidebar-auto-hidden", hidden);
-}
-
-export function setFocusMode(on: boolean, onFocusExit?: () => void) {
-  state.focusMode = on;
-  document.body.classList.toggle("focus-mode", on);
-  focusExitBtn.hidden = !on;
-  localStorage.setItem("notebook:focus", on ? "1" : "0");
-  if (!on && onFocusExit) onFocusExit();
 }
 
 export function initSidebarResizer() {
@@ -430,12 +420,9 @@ export function initSidebar(
 
   initSidebarResizer();
   setSidebarHidden(state.sidebarHidden);
-  setFocusMode(state.focusMode);
 
   sidebarCollapseBtn.addEventListener("click", () => setSidebarHidden(!state.sidebarHidden));
   sidebarExpandBtn.addEventListener("click", () => setSidebarHidden(false));
-  focusToggleBtn.addEventListener("click", () => setFocusMode(true));
-  focusExitBtn.addEventListener("click", () => setFocusMode(false));
 
   searchInputEl.addEventListener("input", () => {
     state.query = searchInputEl.value.trim().toLowerCase();

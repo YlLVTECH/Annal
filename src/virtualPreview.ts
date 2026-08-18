@@ -7,6 +7,7 @@
 
 import {
   getBlocks,
+  getDocumentLineCount,
   highlightBlock,
   isModelEmpty,
   renderBlockHtml,
@@ -35,7 +36,7 @@ export interface PreviewApi {
   totalHeight(): number;
 }
 
-export function initVirtualPreview(container: HTMLElement): PreviewApi {
+export function initVirtualPreview(container: HTMLElement, onLayoutChanged?: () => void): PreviewApi {
   const spacer = document.createElement("div");
   spacer.className = "pv-spacer";
   container.appendChild(spacer);
@@ -49,7 +50,12 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
   const mounted = new Map<number, { el: HTMLElement; height: number }>();
 
   let padTop = 0;
+  let lineHeight = 27;
   let visible = false;
+  let headLineCount = 0;
+  let contentBottom = 0;
+  let tailStartLine = 0;
+  let tailLineCount = 0;
   let total = 0;
   let renderRaf = 0;
   let layoutDirty = true;
@@ -60,12 +66,21 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
   /* ---------- 布局 ---------- */
   function layout() {
     const list = getBlocks();
-    let top = 0;
-    for (const b of list) {
+    headLineCount = list.length > 0 ? list[0].startLine : 0;
+    let top = headLineCount * lineHeight;
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
       b.top = top;
       top += b.height;
+      if (i + 1 < list.length) {
+        const gapLines = Math.max(0, list[i + 1].startLine - b.endLine - 1);
+        top += gapLines * lineHeight;
+      }
     }
-    total = top;
+    contentBottom = top;
+    tailStartLine = list.length > 0 ? list[list.length - 1].endLine + 1 : 0;
+    tailLineCount = Math.max(0, getDocumentLineCount() - tailStartLine);
+    total = contentBottom + tailLineCount * lineHeight;
     spacer.style.height = `${total}px`;
     layoutDirty = false;
   }
@@ -103,7 +118,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
 
     const empty = isModelEmpty();
     emptyEl.hidden = !empty;
-    spacer.style.display = empty ? "none" : "";
+    spacer.style.display = empty && getDocumentLineCount() === 1 ? "none" : "";
     if (empty) {
       unmountAll();
       return;
@@ -173,6 +188,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
     if (relayout) {
       layout();
       scheduleRender();
+      onLayoutChanged?.();
     }
     syncMountedPositions(byId);
   }
@@ -249,6 +265,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
         b.height = h;
         layout();
         scheduleRender();
+        onLayoutChanged?.();
       }
     },
     true,
@@ -258,10 +275,11 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
   let padCacheKey = "";
   function readPadding() {
     const cs = getComputedStyle(container);
-    const key = `${cs.paddingTop}|${cs.paddingLeft}|${cs.paddingRight}|${container.clientWidth}`;
+    const key = `${cs.paddingTop}|${cs.paddingLeft}|${cs.paddingRight}|${cs.lineHeight}|${container.clientWidth}`;
     if (key === padCacheKey) return;
     padCacheKey = key;
     padTop = parseFloat(cs.paddingTop) || 0;
+    lineHeight = parseFloat(cs.lineHeight) || 27;
   }
   readPadding();
   new ResizeObserver(() => {
@@ -271,6 +289,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
 
   /* ---------- 公开接口 ---------- */
   function markLayoutDirty() {
+    readPadding();
     layoutDirty = true;
     measureDirty = true;
     layout();
@@ -299,6 +318,14 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
 
   function mapLineToY(lineFloat: number): number {
     const list = getBlocks();
+    const line = Math.min(Math.max(0, lineFloat), getDocumentLineCount());
+    if (list.length > 0 && headLineCount > 0 && line < list[0].startLine) {
+      return line * lineHeight;
+    }
+    if (tailLineCount > 0 && line >= tailStartLine) {
+      const progress = Math.min(tailLineCount, line - tailStartLine);
+      return contentBottom + progress * lineHeight;
+    }
     if (list.length === 0) return 0;
     // 最后一个 startLine <= lineFloat 的块
     let lo = 0;
@@ -306,7 +333,7 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
     let ans = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (list[mid].startLine <= lineFloat) {
+      if (list[mid].startLine <= line) {
         ans = mid;
         lo = mid + 1;
       } else {
@@ -314,21 +341,33 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
       }
     }
     const b = list[ans];
-    const span = Math.max(1, b.endLine - b.startLine + 1);
-    const f = Math.min(1, Math.max(0, (lineFloat - b.startLine) / span));
-    const nextTop = ans + 1 < list.length ? list[ans + 1].top : b.top + b.height;
+    const nextTop = ans + 1 < list.length ? list[ans + 1].top : contentBottom;
+    const lineSpan =
+      ans + 1 < list.length
+        ? Math.max(1, list[ans + 1].startLine - b.startLine)
+        : Math.max(1, b.endLine - b.startLine + 1);
+    const f = Math.min(1, Math.max(0, (line - b.startLine) / lineSpan));
     return b.top + f * Math.max(0, nextTop - b.top);
   }
 
   function mapYToLine(y: number): number {
     const list = getBlocks();
+    const contentY = Math.min(Math.max(0, y), total);
+    const maxLine = Math.max(0, getDocumentLineCount() - 0.000001);
+    if (tailLineCount > 0 && contentY >= contentBottom) {
+      const line = tailStartLine + (contentY - contentBottom) / lineHeight;
+      return Math.min(maxLine, Math.max(tailStartLine, line));
+    }
     if (list.length === 0) return 0;
+    if (headLineCount > 0 && contentY < list[0].top) {
+      return Math.min(maxLine, contentY / lineHeight);
+    }
     let lo = 0;
     let hi = list.length - 1;
     let ans = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (list[mid].top <= y) {
+      if (list[mid].top <= contentY) {
         ans = mid;
         lo = mid + 1;
       } else {
@@ -336,10 +375,14 @@ export function initVirtualPreview(container: HTMLElement): PreviewApi {
       }
     }
     const b = list[ans];
-    const span = Math.max(1, b.endLine - b.startLine + 1);
-    const height = b.height > 0 ? b.height : estimateSpan(b, span);
-    const f = height > 0 ? Math.min(1, Math.max(0, (y - b.top) / height)) : 0;
-    return b.startLine + f * (span - 1);
+    const nextTop = ans + 1 < list.length ? list[ans + 1].top : contentBottom;
+    const lineSpan =
+      ans + 1 < list.length
+        ? Math.max(1, list[ans + 1].startLine - b.startLine)
+        : Math.max(1, b.endLine - b.startLine + 1);
+    const height = Math.max(0, nextTop - b.top) || estimateSpan(b, lineSpan);
+    const f = height > 0 ? Math.min(1, Math.max(0, (contentY - b.top) / height)) : 0;
+    return Math.min(maxLine, b.startLine + f * lineSpan);
   }
 
   function estimateSpan(b: MdBlock, span: number): number {

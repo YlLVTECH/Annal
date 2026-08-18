@@ -50,7 +50,7 @@ import {
 } from "./state";
 import { closeTablePopover, initTablePopover, toggleTablePopover } from "./table";
 import { parseViewMode } from "./types";
-import type { Note, NoteMeta, OpenFile, Source } from "./types";
+import type { FsSyncResult, Note, NoteMeta, OpenFile, Source } from "./types";
 
 /* ---------- DOM 元素 ---------- */
 const openFileBtn = document.querySelector<HTMLButtonElement>("#open-file-btn")!;
@@ -96,6 +96,9 @@ function getSystemTheme(): "light" | "dark" {
 }
 
 function applySettings() {
+  autosaveEnabled = localStorage.getItem("notebook:autosave") !== "0";
+  autosaveDelayMs = Number(localStorage.getItem("notebook:autosave-delay")) || 500;
+
   const themeMode = localStorage.getItem("notebook:theme-mode") || "system";
   let resolvedTheme: "light" | "dark" = "light";
   if (themeMode === "dark") resolvedTheme = "dark";
@@ -128,12 +131,24 @@ async function refreshList() {
 const renameHints = new Set<string>(); // 本次轮询已提示过改名的笔记 id
 
 async function pollFileStates() {
-  // 1. 同步外部改名/移动：后端按内容匹配把同名文件同步进笔记
+  // 窗口隐藏/最小化时跳过轮询（恢复可见时会立即补一次）
+  if (document.hidden) return;
+  const paths = [...state.notes.map((n) => n.path), ...state.openFiles.map((f) => f.path)].filter(
+    (p) => p.length > 0,
+  );
+  if (paths.length === 0) {
+    if (state.missingPaths.size > 0) {
+      state.missingPaths.clear();
+      renderList();
+    }
+    return;
+  }
   try {
-    const changed = await invoke<NoteMeta[]>("reconcile_notes");
-    if (changed.length > 0) {
+    // 单次往返同时完成外部改名/移动同步与文件存在性检查（后端 sync_fs_state）
+    const res = await invoke<FsSyncResult>("sync_fs_state", { paths });
+    if (res.changed.length > 0) {
       const notesChanged: string[] = [];
-      for (const m of changed) {
+      for (const m of res.changed) {
         const i = state.notes.findIndex((n) => n.id === m.id);
         if (i < 0) continue;
         if (state.notes[i].title !== m.title) notesChanged.push(m.id);
@@ -162,23 +177,7 @@ async function pollFileStates() {
         }
       }
     }
-  } catch {
-    // 同步失败静默，等待下次轮询
-  }
-
-  const paths = [...state.notes.map((n) => n.path), ...state.openFiles.map((f) => f.path)].filter(
-    (p) => p.length > 0,
-  );
-  if (paths.length === 0) {
-    if (state.missingPaths.size > 0) {
-      state.missingPaths.clear();
-      renderList();
-    }
-    return;
-  }
-  try {
-    const states = await invoke<boolean[]>("files_exist", { paths });
-    const next = new Set(paths.filter((_, i) => !states[i]).map(pathKey));
+    const next = new Set(paths.filter((_, i) => !res.exists[i]).map(pathKey));
     const same =
       next.size === state.missingPaths.size && [...next].every((p) => state.missingPaths.has(p));
     if (!same) {
@@ -187,7 +186,7 @@ async function pollFileStates() {
       updateMissingUI(updateMissingBadge);
     }
   } catch {
-    // 轮询失败静默
+    // 轮询失败静默，等待下次
   }
 }
 
@@ -251,12 +250,16 @@ async function flushSave() {
   }
 }
 
+// 自动保存设置缓存在内存（原先每次按键都同步读 localStorage），applySettings 时刷新
+let autosaveEnabled = true;
+let autosaveDelayMs = 500;
+
 function getAutosaveDelay(): number {
-  return Number(localStorage.getItem("notebook:autosave-delay")) || 500;
+  return autosaveDelayMs;
 }
 
 function isAutosaveEnabled(): boolean {
-  return localStorage.getItem("notebook:autosave") !== "0";
+  return autosaveEnabled;
 }
 
 /* ---------- 自适应防抖 ----------
@@ -418,7 +421,7 @@ async function newNote() {
   let path = picked;
   if (!/\.(md|markdown)$/i.test(path)) path += ".md";
 
-  const opened = state.openFiles.find((f) => f.path.toLowerCase() === path.toLowerCase());
+  const opened = state.openFiles.find((f) => pathKey(f.path) === pathKey(path));
   if (opened) {
     await selectSource({ kind: "file", path: opened.path });
     return;
@@ -445,7 +448,7 @@ async function openPaths(paths: string[]): Promise<boolean> {
   const fresh: OpenFile[] = [];
   const errors: string[] = [];
   for (const path of targets) {
-    const existing = state.openFiles.find((f) => f.path === path);
+    const existing = state.openFiles.find((f) => pathKey(f.path) === pathKey(path));
     if (existing) {
       toSelect.push(path);
       continue;
@@ -830,7 +833,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     await selectSource({ kind: "note", id: state.notes[0].id });
   }
 
-  // 14. 周期性轮询外部文件删除状态
+  // 14. 周期性轮询外部文件删除状态（窗口隐藏时跳过，恢复可见立即补一次）
   void pollFileStates();
   window.setInterval(pollFileStates, 3000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void pollFileStates();
+  });
 });

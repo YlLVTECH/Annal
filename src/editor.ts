@@ -717,6 +717,21 @@ export function initEditor(onEditChange: () => void) {
 
   editorEl.addEventListener("paste", handlePasteUrl);
   editorEl.addEventListener("paste", handlePasteImage);
+
+  // 预览区链接点击：按住 Ctrl 时才调用系统浏览器打开，否则保持默认行为
+  previewEl.addEventListener("click", async (e) => {
+    const a = (e.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[href]");
+    if (!a) return;
+    const href = a.getAttribute("href");
+    if (!href || !/^https?:/i.test(href)) return;
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    try {
+      await invoke("open_external", { url: href });
+    } catch {
+      window.open(href, "_blank");
+    }
+  });
 }
 
 /* ---------- 分屏分割条拖拽 ---------- */

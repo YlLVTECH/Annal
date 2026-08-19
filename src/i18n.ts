@@ -5,7 +5,7 @@ let currentMessages: Record<string, string> = {};
 
 async function loadMessages(locale: string): Promise<Record<string, string>> {
   try {
-    const res = await fetch(`/src/i18n/${locale}.json`, { cache: "no-store" });
+    const res = await fetch(`/i18n/${locale}.json`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to load ${locale}`);
     const data = (await res.json()) as Record<string, string>;
     return data;

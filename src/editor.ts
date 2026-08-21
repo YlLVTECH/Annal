@@ -86,38 +86,41 @@ const lineNumbersCompartment = new Compartment();
 /** 加载/切换文档时置位：该次变更不触发自动保存与预览增量更新 */
 let loadingDoc = false;
 
-const extensions: Extension[] = [
-  lineNumbersCompartment.of(lineNumbers()),
-  highlightActiveLine(),
-  history(),
-  drawSelection(),
-  dropCursor(),
-  EditorView.lineWrapping,
-  bracketMatching(),
-  indentUnit.of("  "),
-  markdown(),
-  placeholder(t("editor.placeholder")),
-  readOnlyCompartment.of(EditorState.readOnly.of(false)),
-  EditorView.contentAttributes.of({
-    spellcheck: "false",
-    autocapitalize: "off",
-    autocomplete: "off",
-  }),
-  // 键位优先级：后声明的 keymap 优先。Enter 续行绑定放最后（最高优先），
-  // 其次 Shift+Tab/Tab 缩进；默认键位与历史键位在前。
-  keymap.of(defaultKeymap),
-  keymap.of(historyKeymap),
-  keymap.of([indentWithTab]),
-  keymap.of([{ key: "Enter", run: insertNewlineContinueMarkup }]),
-  EditorView.updateListener.of((update) => {
-    if (!update.docChanged) return;
-    if (loadingDoc) return;
-    onDocChanged(update.changes, update.startState, update.state);
-    deps?.onEditChange();
-    scheduleCount();
-  }),
-  EditorView.domEventHandlers({ paste: handlePaste }),
-];
+/** placeholder 的可替换外壳：init 时可能 i18n 还没就绪，因此后续可热更新 */
+const placeholderCompartment = new Compartment();
+
+function getExtensions(): Extension[] {
+  return [
+    lineNumbersCompartment.of(lineNumbers()),
+    highlightActiveLine(),
+    history(),
+    drawSelection(),
+    dropCursor(),
+    EditorView.lineWrapping,
+    bracketMatching(),
+    indentUnit.of("  "),
+    markdown(),
+    placeholderCompartment.of(placeholder(t("editor.placeholder"))),
+    readOnlyCompartment.of(EditorState.readOnly.of(false)),
+    EditorView.contentAttributes.of({
+      spellcheck: "false",
+      autocapitalize: "off",
+      autocomplete: "off",
+    }),
+    keymap.of(defaultKeymap),
+    keymap.of(historyKeymap),
+    keymap.of([indentWithTab]),
+    keymap.of([{ key: "Enter", run: insertNewlineContinueMarkup }]),
+    EditorView.updateListener.of((update) => {
+      if (!update.docChanged) return;
+      if (loadingDoc) return;
+      onDocChanged(update.changes, update.startState, update.state);
+      deps?.onEditChange();
+      scheduleCount();
+    }),
+    EditorView.domEventHandlers({ paste: handlePaste }),
+  ];
+}
 
 function onDocChanged(
   changes: ChangeSet,
@@ -148,6 +151,13 @@ function onDocChanged(
     { start: minLine, end: maxLine, hasNewlineChange },
     newState.doc.toString(),
   );
+}
+
+export function updateEditorPlaceholder() {
+  if (!view) return;
+  view.dispatch({
+    effects: placeholderCompartment.reconfigure(placeholder(t("editor.placeholder"))),
+  });
 }
 
 /* ---------- 预览与保存状态 ---------- */
@@ -274,7 +284,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   const v = getEditorView();
   loadingDoc = true;
   try {
-    v.setState(EditorState.create({ doc: content, extensions }));
+    v.setState(EditorState.create({ doc: content, extensions: getExtensions() }));
   } finally {
     loadingDoc = false;
   }
@@ -607,8 +617,10 @@ export function initEditor(editorDeps: EditorDeps) {
 
   view = new EditorView({
     parent: mountEl,
-    state: EditorState.create({ doc: "", extensions }),
+    state: EditorState.create({ doc: "", extensions: getExtensions() }),
   });
+
+  updateEditorPlaceholder();
 
   // 预览区链接点击：按住 Ctrl 时才调用系统浏览器打开，否则保持默认行为
   const root = editorDeps.previewElement;

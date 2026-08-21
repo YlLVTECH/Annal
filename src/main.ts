@@ -28,6 +28,7 @@ import {
   setLineNumbersEnabled,
   setViewMode,
   showEditor,
+  updateEditorPlaceholder,
   updateMissingBadge,
 } from "./editor";
 import { initHistory, openHistory } from "./history";
@@ -769,6 +770,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   settingsEls.language.addEventListener("change", async () => {
     await setLocale(settingsEls.language.value);
     applyI18nToDocument();
+    updateEditorPlaceholder();
     const refreshedSettings = syncSettingsUI();
     settingsEls = refreshedSettings;
     openSettings();

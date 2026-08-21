@@ -361,13 +361,15 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border-soft);
   background: var(--bg-pane);
+  border-bottom: 1px solid var(--border-soft);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.03);
 }
 
 .batch-info {
   font-size: 12px;
   color: var(--text-muted);
+  font-weight: 500;
 }
 
 .batch-actions {
@@ -381,8 +383,10 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.12s ease, background-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+  line-height: 1.4;
 }
 
 .batch-btn-primary {
@@ -390,18 +394,36 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   color: #fff;
 }
 
+.batch-btn-primary:hover {
+  background: var(--accent-hover, var(--accent));
+}
+
 .batch-btn-danger {
-  background: var(--danger);
-  color: #fff;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.batch-btn-danger:hover {
+  background: var(--danger-soft, rgba(220, 38, 38, 0.07));
+  color: var(--danger-hover, var(--danger));
 }
 
 .batch-btn-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-soft);
+}
+
+.batch-btn-secondary:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.batch-btn:hover {
-  opacity: 0.85;
+.batch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .sidebar-actions {
@@ -1187,6 +1209,181 @@ body.sidebar-auto-hidden #editor-header {
 #editor .cm-editor .cm-selectionBackground,
 #editor .cm-editor .cm-selectionLayer .cm-selectionBackground {
   background: var(--bg-selection) !important;
+}
+
+/* ---------- 查找 / 替换：VSCode 风格浮动面板 ---------- */
+/* 面板容器悬浮于编辑区右上角，不占用文档流高度（.cm-scroller 的 margin-top
+   是面板机制为“占位面板”预留的内边距，这里强制归零实现悬浮覆盖） */
+#editor .cm-editor .cm-panels.cm-panels-top {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  left: auto;
+  bottom: auto;
+  width: auto;
+  height: auto;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  z-index: 300;
+}
+
+#editor .cm-editor .cm-scroller {
+  margin-top: 0 !important;
+}
+
+.fr-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 300px;
+  max-width: min(60vw, 480px);
+  padding: 6px;
+  background: var(--bg-pane);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.fr-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.fr-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.fr-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.fr-input-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-soft);
+}
+
+.fr-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.fr-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fr-icon.active {
+  background: var(--bg-active);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fr-chevron {
+  font-size: 10px;
+}
+
+.fr-chevron svg {
+  transition: transform 0.15s ease;
+}
+
+.fr-chevron.fr-open svg {
+  transform: rotate(180deg);
+}
+
+.fr-count {
+  flex: none;
+  min-width: 32px;
+  text-align: right;
+  padding: 0 2px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 替换行缩进占位：与查找行左侧的展开箭头等宽，保证两个输入框对齐 */
+.fr-replace-indent {
+  width: 24px;
+  flex: none;
+}
+
+.fr-btn {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--link);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease;
+}
+
+.fr-btn:hover {
+  background: var(--bg-hover);
+  text-decoration: underline;
+}
+
+/* 匹配高亮（searchHighlighter 提供的 .cm-searchMatch） */
+#editor .cm-editor .cm-searchMatch {
+  background: var(--accent-soft);
+  border-radius: 2px;
+}
+
+#editor .cm-editor .cm-searchMatch-selected {
+  background: var(--bg-selection);
+  outline: 1px solid var(--accent);
+  border-radius: 2px;
+}
+
+/* 深色模式：面板底色更贴近 VSCode 暗色 */
+[data-theme="dark"] #editor .cm-editor .fr-widget {
+  background: #252527;
+  border-color: #3e3e42;
+}
+
+[data-theme="dark"] #editor .cm-editor .fr-input {
+  background: #2d2d30;
+  border-color: #3e3e42;
+}
+
+[data-theme="dark"] #editor .cm-editor .fr-input-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-soft);
 }
 
 #preview {
@@ -2681,6 +2878,70 @@ body.resizing #preview {
 .settings-select option {
   background: var(--bg-pane);
   color: var(--text);
+}
+
+/* ============ 设置 - 关于页面 ============ */
+.settings-about-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 18px 18px;
+  gap: 4px;
+}
+
+.settings-about-app-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.settings-about-version {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.settings-about-divider {
+  width: 40px;
+  height: 1px;
+  background: var(--border-soft);
+  margin: 14px 0;
+}
+
+.settings-about-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 280px;
+  margin-bottom: 6px;
+}
+
+#feedback-btn {
+  margin-top: 10px;
+  height: 32px;
+  padding: 0 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#feedback-btn:hover {
+  background: var(--accent-hover);
+}
+
+#feedback-btn:active {
+  opacity: 0.85;
 }
 
 /* 开关 */

@@ -30,3 +30,4 @@ target
 
 # ZCode workspace
 .zcode/
+rustup-init.exe

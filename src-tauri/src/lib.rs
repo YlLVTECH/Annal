@@ -94,6 +94,9 @@ struct NoteMeta {
     /// 仅保留字段以兼容读取旧索引。
     #[serde(default)]
     title_locked: bool,
+    /// 是否置顶。置顶笔记在列表中始终排在最前面。
+    #[serde(default)]
+    pinned: bool,
 }
 
 /// 笔记完整数据（元信息 + 正文）。
@@ -621,12 +624,95 @@ fn save_index(app: &tauri::AppHandle, metas: &[NoteMeta]) -> Result<(), String> 
     write_index(&index_path(app)?, metas)
 }
 
-/// 列出全部笔记（按更新时间倒序）。
+/// 列出全部笔记（置顶优先，同组按更新时间倒序）。
 #[tauri::command]
 async fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteMeta>, String> {
     let mut metas = state.index.lock().map_err(|e| e.to_string())?.clone();
-    metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    metas.sort_by(|a, b| {
+        match (a.pinned, b.pinned) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.updated_at.cmp(&a.updated_at),
+        }
+    });
     Ok(metas)
+}
+
+/// 全文搜索笔记：标题命中权重高于正文命中，结果按权重降序排列。
+#[tauri::command]
+async fn search_notes(
+    _app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    query: String,
+) -> Result<Vec<NoteMeta>, String> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Ok(vec![]);
+    }
+    let metas = state.index.lock().map_err(|e| e.to_string())?.clone();
+    // 文件 IO 放到阻塞线程池，不阻塞 async 运行时
+    let results = tauri::async_runtime::spawn_blocking(move || {
+        let mut scored: Vec<(NoteMeta, i32)> = Vec::new();
+        for meta in metas {
+            let path = note_file(&meta);
+            if !path.is_file() {
+                continue;
+            }
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let title = meta.title.to_lowercase();
+            let mut score = 0;
+            // 标题命中：权重 15；命中开头额外 +5
+            if title.contains(&q) {
+                score += 15;
+                if title.starts_with(&q) {
+                    score += 5;
+                }
+            }
+            // 正文命中：每出现一次 +1（上限 50 避免过长文档过度加权）
+            let mut count = 0;
+            let content_lower = content.to_lowercase();
+            let mut start = 0;
+            while let Some(pos) = content_lower[start..].find(&q) {
+                count += 1;
+                start += pos + q.len();
+                if start >= content_lower.len() {
+                    break;
+                }
+            }
+            if count > 0 {
+                score += count.min(50);
+            }
+            if score > 0 {
+                scored.push((meta, score));
+            }
+        }
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.into_iter().map(|(m, _)| m).collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(results)
+}
+
+/// 切换笔记置顶状态，返回更新后的 NoteMeta。
+#[tauri::command]
+async fn toggle_pin(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<NoteMeta, String> {
+    let mut metas = state.index.lock().map_err(|e| e.to_string())?;
+    let meta = metas
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| format!("笔记不存在: {id}"))?;
+    meta.pinned = !meta.pinned;
+    let meta = meta.clone();
+    save_index(&app, &metas)?;
+    Ok(meta)
 }
 
 /// 新建一篇笔记：文件保存在用户选择的目录与初始文件名（前端先弹保存对话框）。
@@ -665,6 +751,7 @@ async fn create_note(
         path: path.clone(),
         content_hash: String::new(),
         title_locked: true,
+        pinned: false,
     };
     // 若所选位置已被一个同名文件占用（可能不是笔记），重名自动加序号绝不覆盖。
     // 已有内容的文件内容先读出来保留（新笔记不丢弃用户已放好的内容）。
@@ -1171,6 +1258,7 @@ fn save_file_as_note_core(
         path: target.to_string_lossy().into_owned(),
         content_hash: String::new(),
         title_locked: true,
+        pinned: false,
     };
     // 若覆盖到一个已存在的目标文件，先把它移走/改名成本笔记唯一目标
     let (title, resolved) = resolve_note_target(&metas, &meta.id, target, &desired);
@@ -1237,6 +1325,7 @@ async fn save_file_as_note(
         path: target_p.to_string_lossy().into_owned(),
         content_hash: String::new(),
         title_locked: true,
+        pinned: false,
     };
     // 用唯一目标（笔记名=文件名，重名自动加序号）；覆盖目标时清理原文件
     let (title, resolved) = resolve_note_target(&metas, &meta.id, target_p, &desired);
@@ -1451,6 +1540,8 @@ pub fn run() {
         .manage(PendingFiles(Mutex::new(pending)))
         .invoke_handler(tauri::generate_handler![
             list_notes,
+            search_notes,
+            toggle_pin,
             create_note,
             get_note,
             update_note,

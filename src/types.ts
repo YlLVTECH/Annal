@@ -8,6 +8,8 @@ export interface NoteMeta {
   path: string;
   /** 最近保存正文的 SHA-256 摘要（前 16 位十六进制），用于外部改名/移动后的内容匹配 */
   contentHash?: string;
+  /** 是否置顶 */
+  pinned?: boolean;
 }
 
 /** 笔记完整实体（含正文） */

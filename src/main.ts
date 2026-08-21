@@ -31,6 +31,7 @@ import {
   updateEditorPlaceholder,
   updateMissingBadge,
 } from "./editor";
+import { refreshFindReplaceI18n } from "./findReplace";
 import { initHistory, openHistory } from "./history";
 import { initShortcuts } from "./shortcuts";
 import {
@@ -445,6 +446,64 @@ async function batchExportSelected(ids: string[]) {
   }
 }
 
+async function batchImportSelected(ids: string[]) {
+  const filePaths = ids.filter((id) => state.openFiles.some((f) => f.path === id));
+  if (filePaths.length === 0) {
+    setStatus(t("status.batch.noImportable"));
+    return;
+  }
+  const noteIds = ids.filter((id) => !filePaths.includes(id));
+  if (noteIds.length > 0) {
+    setStatus(t("status.batch.noImportable"));
+    return;
+  }
+  try {
+    const results: NoteMeta[] = [];
+    for (const path of filePaths) {
+      const f = state.openFiles.find((f) => f.path === path);
+      if (!f) continue;
+      const dir = dirOfPath(f.path);
+      const stem = baseName(f.path).replace(/\.(md|markdown|txt)$/i, "") || t("dialog.untitledNote");
+      const sep = dir.includes("/") ? "/" : "\\";
+      const defaultPath = dir ? dir + sep + stem + ".md" : stem + ".md";
+      const picked = await saveDialog({
+        title: t("dialog.saveAs"),
+        defaultPath,
+        filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
+      });
+      if (!picked) continue;
+      let dst = picked;
+      if (!/\.(md|markdown)$/i.test(dst)) dst += ".md";
+      const noteAtPath = state.notes.find((n) => pathKey(n.path) === pathKey(dst));
+      if (noteAtPath) {
+        setStatus(t("status.saveAsConflict", { title: noteAtPath.title }));
+        continue;
+      }
+      const [exists] = await invoke<boolean[]>("files_exist", { paths: [dst] });
+      let overwrite = false;
+      if (exists) {
+        const ok = confirm(t("confirm.text.overwrite", { path: dst }));
+        if (!ok) continue;
+        overwrite = true;
+      }
+      const meta = await invoke<NoteMeta>("save_file_as_note", {
+        source: f.path,
+        target: dst,
+        overwrite,
+      });
+      results.push(meta);
+      await closeFile(f.path);
+    }
+    await refreshList();
+    if (results.length > 0) {
+      setStatus(t("status.batch.importDone", { count: results.length }));
+    }
+    clearSelection();
+  } catch (err) {
+    setStatus(t("status.batch.importFail", { error: String(err) }));
+  }
+}
+
 /* ---------- 新建 / 打开 / 关闭 / 删除 / 另存为 ---------- */
 async function newNote() {
   await flushSave();
@@ -480,19 +539,24 @@ async function openPaths(paths: string[]): Promise<boolean> {
   if (targets.length === 0) return false;
   await flushSave();
 
-  const toSelect: string[] = [];
+  const toSelect: Source[] = [];
   const fresh: OpenFile[] = [];
   const errors: string[] = [];
   for (const path of targets) {
-    const existing = state.openFiles.find((f) => pathKey(f.path) === pathKey(path));
-    if (existing) {
-      toSelect.push(path);
+    const existingFile = state.openFiles.find((f) => pathKey(f.path) === pathKey(path));
+    if (existingFile) {
+      toSelect.push({ kind: "file", path });
+      continue;
+    }
+    const existingNote = state.notes.find((n) => pathKey(n.path) === pathKey(path));
+    if (existingNote) {
+      toSelect.push({ kind: "note", id: existingNote.id });
       continue;
     }
     try {
       const f = await invoke<OpenFile>("open_md_file", { path });
       fresh.push(f);
-      toSelect.push(path);
+      toSelect.push({ kind: "file", path });
     } catch (e) {
       errors.push(`${path}: ${e}`);
     }
@@ -502,7 +566,7 @@ async function openPaths(paths: string[]): Promise<boolean> {
     renderList();
   }
   if (toSelect.length > 0) {
-    await selectSource({ kind: "file", path: toSelect[0] });
+    await selectSource(toSelect[0]);
     if (fresh.length > 1) setStatus(t("status.filesOpened", { count: fresh.length }));
   }
   if (errors.length > 0) setStatus(t("status.openFail", { error: errors.join("；") }));
@@ -644,6 +708,24 @@ function requestDelete(id?: string) {
   });
 }
 
+async function togglePin(id: string) {
+  try {
+    const updated = await invoke<NoteMeta>("toggle_pin", { id });
+    const i = state.notes.findIndex((n) => n.id === id);
+    if (i >= 0) {
+      state.notes[i] = updated;
+      state.notes.sort((a, b) => {
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+    renderList();
+    setStatus(updated.pinned ? t("status.pinSuccess") : t("status.unpinSuccess"));
+  } catch (err) {
+    setStatus(t("status.pinFail", { error: String(err) }));
+  }
+}
+
 /* ---------- 右键菜单分发 ---------- */
 function onListContextMenu(e: MouseEvent) {
   e.preventDefault();
@@ -652,8 +734,9 @@ function onListContextMenu(e: MouseEvent) {
   if (li?.dataset.noteId) {
     const id = li.dataset.noteId;
     const path = state.notes.find((n) => n.id === id)?.path ?? "";
+    const meta = state.notes.find((n) => n.id === id);
     void selectSource({ kind: "note", id });
-    showContextMenu(e.clientX, e.clientY, [
+    const items: { label: string; action: () => void; danger?: boolean }[] = [
       { label: t("contextMenu.rename"), action: () => startRename(id) },
       {
         label: t("contextMenu.commit"),
@@ -661,8 +744,13 @@ function onListContextMenu(e: MouseEvent) {
       },
       { label: t("contextMenu.history"), action: () => void openHistory(id, flushSave) },
       { label: t("contextMenu.reveal"), action: () => void revealInFolder(path) },
+      {
+        label: meta?.pinned ? t("contextMenu.unpin") : t("contextMenu.pin"),
+        action: () => void togglePin(id),
+      },
       { label: t("contextMenu.delete"), danger: true, action: () => requestDelete(id) },
-    ]);
+    ];
+    showContextMenu(e.clientX, e.clientY, items);
   } else if (li?.dataset.filePath) {
     const path = li.dataset.filePath;
     void selectSource({ kind: "file", path });
@@ -771,6 +859,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     await setLocale(settingsEls.language.value);
     applyI18nToDocument();
     updateEditorPlaceholder();
+    refreshFindReplaceI18n();
     const refreshedSettings = syncSettingsUI();
     settingsEls = refreshedSettings;
     openSettings();
@@ -841,6 +930,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     },
     batchDeleteSelected,
+    batchImportSelected,
     batchExportSelected,
   );
   initShortcuts({ onNewNote: newNote, onOpenFile: openFileDialog, onFlushSave: flushSave, editorHasFocus });

@@ -26,6 +26,7 @@ import {
 } from "@codemirror/commands";
 import { bracketMatching, indentUnit } from "@codemirror/language";
 import { insertNewlineContinueMarkup, markdown } from "@codemirror/lang-markdown";
+import { closeFindPanel, findReplaceExtension } from "./findReplace";
 import { setScrollSyncSuspended, scheduleResync as scheduleSplitResync } from "./documentPosition";
 import {
   IMAGE_EXT_RE,
@@ -111,6 +112,7 @@ function getExtensions(): Extension[] {
     keymap.of(historyKeymap),
     keymap.of([indentWithTab]),
     keymap.of([{ key: "Enter", run: insertNewlineContinueMarkup }]),
+    findReplaceExtension(),
     EditorView.updateListener.of((update) => {
       if (!update.docChanged) return;
       if (loadingDoc) return;
@@ -308,6 +310,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
 export function closeEditor() {
   state.current = null;
   state.dirty = false;
+  closeFindPanel(getEditorView());
   syncEditingState();
   commitNoteBtn.hidden = true;
   saveAsNoteBtn.hidden = true;

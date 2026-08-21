@@ -27,6 +27,7 @@ const pageSizeSelect = document.querySelector<HTMLSelectElement>("#page-size")!;
 const batchBar = document.querySelector<HTMLDivElement>("#batch-bar")!;
 const batchCount = document.querySelector<HTMLSpanElement>("#batch-count")!;
 const batchDeleteBtn = document.querySelector<HTMLButtonElement>("#batch-delete-btn")!;
+const batchImportBtn = document.querySelector<HTMLButtonElement>("#batch-import-btn")!;
 const batchExportBtn = document.querySelector<HTMLButtonElement>("#batch-export-btn")!;
 const batchCancelBtn = document.querySelector<HTMLButtonElement>("#batch-cancel-btn")!;
 
@@ -35,6 +36,7 @@ let onRenameSuccessCallback: ((id: string, updated: NoteMeta) => void) | null = 
 let onStatusCallback: ((msg: string) => void) | null = null;
 let onContextMenuCallback: ((e: MouseEvent) => void) | null = null;
 let onBatchDeleteCallback: ((ids: string[]) => Promise<void>) | null = null;
+let onBatchImportCallback: ((ids: string[]) => Promise<void>) | null = null;
 let onBatchExportCallback: ((ids: string[]) => Promise<void>) | null = null;
 
 /* ---------- 侧栏宽度 / 折叠 ---------- */
@@ -189,6 +191,8 @@ export function updateSelectionUI() {
   const count = state.selectedIds.length;
   batchCount.textContent = String(count);
   batchBar.hidden = count === 0;
+  const hasNote = state.selectedIds.some((id) => state.notes.some((n) => n.id === id));
+  batchImportBtn.disabled = hasNote;
   for (const li of noteListEl.querySelectorAll<HTMLLIElement>(".note-item")) {
     const key = getItemKey(li);
     li.classList.toggle("selected", key ? isItemSelected(key) : false);
@@ -245,22 +249,30 @@ export function renderList() {
   const scrollTop = noteListEl.scrollTop;
   noteListEl.innerHTML = "";
   const frag = document.createDocumentFragment();
+
+  const displayNotes = state.searchResults ?? state.notes;
+  const isSearching = state.query.length > 0 && state.searchResults === null;
   const filtered = state.query
-    ? state.notes.filter((n) => n.title.toLowerCase().includes(state.query))
-    : state.notes;
+    ? displayNotes.filter((n) => n.title.toLowerCase().includes(state.query))
+    : displayNotes;
   const filesShown = state.query
     ? state.openFiles.filter((f) => f.name.toLowerCase().includes(state.query))
     : state.openFiles;
 
   emptyHintEl.hidden = filtered.length > 0 || filesShown.length > 0;
   const [hintMain, hintSub] = emptyHintEl.querySelectorAll("p");
-  hintMain.textContent = state.notes.length > 0 ? t("sidebar.noMatch") : t("sidebar.empty.title");
-  hintSub.textContent =
-    state.notes.length > 0
-      ? ""
-      : state.openFiles.length > 0
-        ? t("sidebar.empty.sub")
-        : t("sidebar.empty.subWithOpen");
+  if (isSearching) {
+    hintMain.textContent = t("sidebar.searching");
+    hintSub.textContent = "";
+  } else {
+    hintMain.textContent = state.notes.length > 0 ? t("sidebar.noMatch") : t("sidebar.empty.title");
+    hintSub.textContent =
+      state.notes.length > 0
+        ? ""
+        : state.openFiles.length > 0
+          ? t("sidebar.empty.sub")
+          : t("sidebar.empty.subWithOpen");
+  }
 
   if (filesShown.length > 0) {
     addGroupHeader(frag, "sidebar.group.externalFiles");
@@ -311,7 +323,15 @@ export function renderList() {
 
       const title = document.createElement("div");
       title.className = "note-title";
-      title.textContent = n.title;
+      if (n.pinned) {
+        const pin = document.createElement("span");
+        pin.className = "pin-icon";
+        pin.textContent = "📌";
+        pin.title = t("contextMenu.pin");
+        title.appendChild(pin);
+        title.appendChild(document.createTextNode(" "));
+      }
+      title.appendChild(document.createTextNode(n.title));
 
       const time = document.createElement("div");
       time.className = "note-time";
@@ -410,6 +430,7 @@ export function initSidebar(
   onContextMenu: (e: MouseEvent) => void,
   onRenameSuccess?: (id: string, updated: NoteMeta) => void,
   onBatchDelete?: (ids: string[]) => Promise<void>,
+  onBatchImport?: (ids: string[]) => Promise<void>,
   onBatchExport?: (ids: string[]) => Promise<void>,
 ) {
   onSelectSourceCallback = onSelect;
@@ -417,6 +438,7 @@ export function initSidebar(
   onContextMenuCallback = onContextMenu;
   if (onRenameSuccess) onRenameSuccessCallback = onRenameSuccess;
   if (onBatchDelete) onBatchDeleteCallback = onBatchDelete;
+  if (onBatchImport) onBatchImportCallback = onBatchImport;
   if (onBatchExport) onBatchExportCallback = onBatchExport;
 
   initSidebarResizer();
@@ -428,7 +450,24 @@ export function initSidebar(
   searchInputEl.addEventListener("input", () => {
     state.query = searchInputEl.value.trim().toLowerCase();
     state.listPage = 1;
+    state.searchResults = null;
     renderList();
+    // 防抖 300ms 调用后端全文搜索
+    window.clearTimeout((searchInputEl as HTMLInputElement & { _timer?: number })._timer);
+    (searchInputEl as HTMLInputElement & { _timer?: number })._timer = window.setTimeout(async () => {
+      if (!state.query) {
+        state.searchResults = null;
+        renderList();
+        return;
+      }
+      try {
+        const results = await invoke<NoteMeta[]>("search_notes", { query: state.query });
+        state.searchResults = results;
+      } catch {
+        state.searchResults = [];
+      }
+      renderList();
+    }, 300);
   });
 
   noteListEl.addEventListener("contextmenu", (e) => {
@@ -471,6 +510,12 @@ export function initSidebar(
     const ids = [...state.selectedIds];
     if (ids.length === 0) return;
     if (onBatchDeleteCallback) await onBatchDeleteCallback(ids);
+  });
+
+  batchImportBtn.addEventListener("click", async () => {
+    const ids = [...state.selectedIds];
+    if (ids.length === 0) return;
+    if (onBatchImportCallback) await onBatchImportCallback(ids);
   });
 
   batchExportBtn.addEventListener("click", async () => {

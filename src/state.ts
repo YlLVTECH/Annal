@@ -42,6 +42,8 @@ export const state = {
   selectedIds: [] as string[],
   /** 范围选择（Shift+点击）的锚点标识 */
   rangeAnchorId: null as string | null,
+  /** 全文搜索结果（null 表示未搜索，使用 notes 全量） */
+  searchResults: null as NoteMeta[] | null,
 };
 
 /* ---------- 通用格式化与路径辅助函数 ---------- */

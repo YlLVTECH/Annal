@@ -4,6 +4,9 @@ import { parseViewMode } from "./types";
 import { getAvailableLocales, t } from "./i18n";
 import type { CtxItem, NoteVersion } from "./types";
 
+/* ---------- 反馈链接（替换为实际仓库 issues 地址） ---------- */
+const FEEDBACK_URL = "https://github.com";
+
 /* ---------- DOM 元素获取 ---------- */
 const contextMenuEl = document.querySelector<HTMLDivElement>("#context-menu")!;
 const confirmOverlayEl = document.querySelector<HTMLDivElement>("#confirm-overlay")!;
@@ -28,6 +31,8 @@ const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setti
 const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
 const settingLineNumbersEl = document.querySelector<HTMLInputElement>("#setting-line-numbers")!;
 const settingLanguageEl = document.querySelector<HTMLSelectElement>("#setting-language")!;
+const feedbackBtnEl = document.querySelector<HTMLButtonElement>("#feedback-btn")!;
+const settingsVersionEl = document.querySelector<HTMLSpanElement>("#settings-version")!;
 const settingsSidebarEl = document.querySelector<HTMLElement>("#settings-sidebar")!;
 const settingsContentEl = document.querySelector<HTMLElement>(".settings-content")!;
 const settingsNavItems = settingsSidebarEl.querySelectorAll<HTMLButtonElement>(".settings-nav-item");
@@ -202,6 +207,14 @@ export function initDialogs() {
   window.addEventListener("blur", hideContextMenu);
   window.addEventListener("resize", hideContextMenu);
   window.addEventListener("scroll", hideContextMenu, true);
+
+  feedbackBtnEl.addEventListener("click", async () => {
+    try {
+      await invoke("open_external", { url: FEEDBACK_URL });
+    } catch (err) {
+      console.error("Failed to open feedback URL:", err);
+    }
+  });
 }
 
 /* ---------- 设置弹层 ---------- */
@@ -276,6 +289,11 @@ export function syncSettingsUI() {
     opt.textContent = locale.label;
     if (locale.value === currentLocale) opt.selected = true;
     els.language.appendChild(opt);
+  }
+
+  // 填充版本号（与 tauri.conf.json / Cargo.toml 保持一致）
+  if (settingsVersionEl) {
+    settingsVersionEl.textContent = "v0.2.0";
   }
 
   return els;

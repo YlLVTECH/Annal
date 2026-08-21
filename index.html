@@ -58,6 +58,7 @@
           <span class="batch-info">已选 <span id="batch-count">0</span> 项</span>
           <div class="batch-actions">
             <button id="batch-delete-btn" class="batch-btn batch-btn-danger">删除</button>
+            <button id="batch-import-btn" class="batch-btn batch-btn-primary">导入为笔记</button>
             <button id="batch-export-btn" class="batch-btn batch-btn-primary">导出</button>
             <button id="batch-cancel-btn" class="batch-btn batch-btn-secondary">取消</button>
           </div>
@@ -159,6 +160,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg>
             </button>
           </div>
+          <div class="toolbar-sep"></div>
           <div class="toolbar-spacer"></div>
           <div class="toolbar-group" id="view-toggle" title="视图模式">
             <button class="view-btn active" data-mode="edit" data-i18n="toolbar.view.edit" data-i18n-title="toolbar.view.edit" title="编辑 (Ctrl+E)">编辑</button>
@@ -287,6 +289,9 @@
             <button class="settings-nav-item" data-category="editing">
               <span class="settings-nav-label" data-i18n="settings.category.editing">编辑</span>
             </button>
+            <button class="settings-nav-item" data-category="about">
+              <span class="settings-nav-label" data-i18n="settings.category.about">关于</span>
+            </button>
           </aside>
           <div class="settings-content">
             <div class="settings-section" data-section="appearance">
@@ -389,6 +394,22 @@
                   <option value="1000">1 秒</option>
                   <option value="2000">2 秒</option>
                 </select>
+              </div>
+            </div>
+            <div class="settings-section" data-section="about" hidden>
+              <p class="settings-section-title" data-i18n="settings.about">关于</p>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.appName">笔记本</span>
+                  <span class="settings-desc" data-i18n="settings.version" id="settings-version">v0.2.0</span>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.feedback">反馈 Bug</span>
+                  <span class="settings-desc" data-i18n="settings.feedback.desc">遇到问题或建议？欢迎提交反馈</span>
+                </div>
+                <button id="feedback-btn" class="btn-primary" data-i18n="settings.feedback.btn">提交反馈</button>
               </div>
             </div>
           </div>

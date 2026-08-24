@@ -41,6 +41,7 @@ import {
   scheduleResync,
 } from "./documentPosition";
 import { initVirtualPreview, type PreviewApi } from "./virtualPreview";
+import { initOutline, refreshOutline } from "./outline";
 import {
   applyEdit,
   loadModel,
@@ -88,6 +89,11 @@ const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
 
 let saveTimer: number | undefined;
 
+/** 最近一次本地保存时刻：文件监听事件可能由自身写入触发，短时间内跳过 */
+let lastLocalSaveAt = 0;
+/** 已注册监听的目标目录集合签名（变化时才调用 watch_note_dirs，避免重复 IPC） */
+let lastWatchKey = "";
+
 /** 虚拟预览实例（在初始化阶段创建，供模块级函数在删除/关闭流程中刷新） */
 let previewApi: PreviewApi | null = null;
 
@@ -97,6 +103,7 @@ function openInEditor(title: string, content: string, path: string) {
   loadModel(content);
   showEditor(title, content, path);
   previewApi?.refresh();
+  refreshOutline();
 }
 
 /** 关闭当前编辑对象：清空模型与预览 */
@@ -104,6 +111,7 @@ function closeActiveEditor() {
   closeEditor();
   resetModel();
   previewApi?.refresh();
+  refreshOutline();
 }
 
 /* ---------- 主题 ---------- */
@@ -163,6 +171,17 @@ async function refreshList() {
   state.notes = await invoke<NoteMeta[]>("list_notes");
   state.listPage = 1;
   renderList();
+  // 笔记集合变化后同步文件监听目录（增删笔记/导入导出等会改变路径集合）
+  void pollFileStates();
+}
+
+/** 目录集合变化时同步 notify 监听（路径集相同则跳过，不发起 IPC） */
+function syncWatchPaths(paths: string[]) {
+  const dirs = [...new Set(paths.map((p) => dirOfPath(p)).filter((d) => d.length > 0))].sort();
+  const key = dirs.join("|");
+  if (key === lastWatchKey) return;
+  lastWatchKey = key;
+  void invoke("watch_note_dirs", { paths }).catch(() => {});
 }
 
 /* ---------- 外部文件/笔记删除状态轮询与改名同步 ---------- */
@@ -174,6 +193,8 @@ async function pollFileStates() {
   const paths = [...state.notes.map((n) => n.path), ...state.openFiles.map((f) => f.path)].filter(
     (p) => p.length > 0,
   );
+  // 路径集合变化时同步 notify 监听（外部文件变更的事件驱动入口）
+  syncWatchPaths(paths);
   if (paths.length === 0) {
     if (state.missingPaths.size > 0) {
       state.missingPaths.clear();
@@ -232,6 +253,8 @@ async function pollFileStates() {
 async function save() {
   if (!state.dirty || !state.current) return;
   const content = getEditorText();
+  // 记录本地保存时刻：写盘会触发文件监听事件，短时间内跳过自触发的同步
+  lastLocalSaveAt = Date.now();
   setSaveStatus("saving", t("status.saving"));
 
   try {
@@ -871,24 +894,27 @@ window.addEventListener("DOMContentLoaded", async () => {
       text: getSelectedText(),
     };
   });
-  initHistory(
-    async (restored, isCurrent) => {
-      const i = state.notes.findIndex((n) => n.id === restored.id);
-      if (i >= 0) state.notes[i] = restored;
-      state.notes.sort((a, b) => b.updatedAt - a.updatedAt);
-      state.missingPaths.delete(pathKey(restored.path));
-      renderList();
-      updateMissingUI(updateMissingBadge);
-      if (isCurrent) {
-        const opened = await invoke<Note>("get_note", { id: restored.id });
-        openInEditor(opened.title, opened.content, opened.path);
-        setStatus(t("status.versionRestored"));
-      } else {
-        setStatus(t("status.versionRestoredOther", { title: restored.title }));
-      }
-    },
-    (msg) => setStatus(msg),
-  );
+  // 低频模块（历史面板）延后到首帧之后绑定，缩短启动关键路径
+  window.setTimeout(() => {
+    initHistory(
+      async (restored, isCurrent) => {
+        const i = state.notes.findIndex((n) => n.id === restored.id);
+        if (i >= 0) state.notes[i] = restored;
+        state.notes.sort((a, b) => b.updatedAt - a.updatedAt);
+        state.missingPaths.delete(pathKey(restored.path));
+        renderList();
+        updateMissingUI(updateMissingBadge);
+        if (isCurrent) {
+          const opened = await invoke<Note>("get_note", { id: restored.id });
+          openInEditor(opened.title, opened.content, opened.path);
+          setStatus(t("status.versionRestored"));
+        } else {
+          setStatus(t("status.versionRestoredOther", { title: restored.title }));
+        }
+      },
+      (msg) => setStatus(msg),
+    );
+  }, 0);
   // 预览虚拟化实例：块级渲染，只挂载视口附近的块
   previewApi = initVirtualPreview(
     document.querySelector<HTMLElement>("#preview")!,
@@ -898,14 +924,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 编辑器初始化（CodeMirror 6）：输入变更驱动块模型的增量更新与虚拟预览刷新
   initEditor({
     onEditChange: () => scheduleSave(),
-    onDocChange: (range, text) => {
+    onDocChange: (range, doc) => {
       notifyEditorActivity();
       const changed = applyEdit(
-        text,
-        { start: range.start, end: range.end },
+        doc,
+        { start: range.start, end: range.end, endNew: range.endNew },
         { newlineChange: range.hasNewlineChange },
       );
       previewApi?.refresh(changed);
+      refreshOutline();
     },
     setPreviewVisible: (visible) => previewApi?.setVisible(visible),
     refreshPreview: () => {
@@ -938,6 +965,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 7. 分屏滚动同步：逻辑位置同步（编辑区源行 ↔ 预览区块），见 documentPosition.ts
   initScrollSync({ getEditorView, getPreview: () => previewApi! });
 
+  // 7.5 大纲面板：从块模型提取标题渲染目录树，点击跳转到对应行
+  initOutline({ getEditorView, getPreview: () => previewApi! });
+
   // 8. 头部按钮绑定
   commitNoteBtn.addEventListener("click", () => void requestCommit(undefined, flushSave, setStatus));
   saveAsNoteBtn.addEventListener("click", () => void saveFileAsNote());
@@ -952,8 +982,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 10. 失焦立即冲刷保存
-  window.addEventListener("blur", () => void flushSave());
+  // 10. 失焦立即冲刷保存与未落盘的索引修改（索引懒刷盘的冲刷时机）
+  window.addEventListener("blur", () => {
+    void flushSave();
+    void invoke("flush_index").catch(() => {});
+  });
 
   // 10.5 Esc 清除多选
   window.addEventListener("keydown", (e) => {
@@ -973,9 +1006,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 11.5 切换前/关闭前主动清理保存状态，避免停留在“保存中/失败”提示
+  // 11.5 切换前/关闭前主动清理保存状态，避免停留在“保存中/失败”提示；
+  // 同时冲刷未落盘的索引修改（真正关窗时 close_ready 也会冲刷）
   const cleanupBeforeLeave = async () => {
     if (!state.dirty) resetSaveStatus();
+    void invoke("flush_index").catch(() => {});
   };
   window.addEventListener("pagehide", cleanupBeforeLeave);
   window.addEventListener("beforeunload", cleanupBeforeLeave);
@@ -993,9 +1028,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     await selectSource({ kind: "note", id: state.notes[0].id });
   }
 
-  // 14. 周期性轮询外部文件删除状态（窗口隐藏时跳过，恢复可见立即补一次）
+  // 14. 外部文件变更同步：后端 notify 文件监听合并成 fs-notes-changed 事件驱动，
+  // 取代 3 秒轮询；保留 60 秒慢速兜底与恢复可见时的即时补一次
   void pollFileStates();
-  window.setInterval(pollFileStates, 3000);
+  void listen("fs-notes-changed", () => {
+    // 自身自动保存也会触发监听事件：短时间内跳过，避免自触发往返
+    if (Date.now() - lastLocalSaveAt > 1500) void pollFileStates();
+  });
+  window.setInterval(pollFileStates, 60000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void pollFileStates();
   });

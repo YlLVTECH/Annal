@@ -28,6 +28,7 @@ import { bracketMatching, indentUnit } from "@codemirror/language";
 import { insertNewlineContinueMarkup, markdown } from "@codemirror/lang-markdown";
 import { closeFindPanel, findReplaceExtension } from "./findReplace";
 import { setScrollSyncSuspended, scheduleResync as scheduleSplitResync } from "./documentPosition";
+import type { DocText } from "./markdownModel";
 import {
   IMAGE_EXT_RE,
   SPLIT_RATIO_DEFAULT,
@@ -43,11 +44,12 @@ import type { ViewMode } from "./types";
 export interface EditorDeps {
   /** 内容编辑后的回调（自动保存入口） */
   onEditChange: () => void;
-  /** 文档变更回调：range 为 0 起始的源行闭区间；hasNewlineChange 表示本次编辑
-   *  插入或删除了换行（影响块边界，模型据此决定是否走全量重解析） */
+  /** 文档变更回调：range 为 0 起始的源行区间，start/end 为旧坐标、endNew 为新坐标；
+   *  hasNewlineChange 表示本次编辑插入或删除了换行（影响块边界，模型据此决定解析路径）；
+   *  doc 为编辑器 Text（按行切片访问，不整篇字符串化） */
   onDocChange: (
-    range: { start: number; end: number; hasNewlineChange: boolean },
-    text: string,
+    range: { start: number; end: number; endNew: number; hasNewlineChange: boolean },
+    doc: DocText,
   ) => void;
   /** 预览可见性控制（编辑模式隐藏） */
   setPreviewVisible: (visible: boolean) => void;
@@ -69,6 +71,7 @@ const savedStatusEl = document.querySelector<HTMLSpanElement>("#saved-status")!;
 const editorEmptyEl = document.querySelector<HTMLDivElement>("#editor-empty")!;
 const toolbarEl = document.querySelector<HTMLDivElement>("#toolbar")!;
 const editorBodyEl = document.querySelector<HTMLDivElement>("#editor-body")!;
+const editorMainEl = document.querySelector<HTMLDivElement>("#editor-main")!;
 const editorWrapEl = document.querySelector<HTMLDivElement>("#editor-wrap")!;
 const splitResizerEl = document.querySelector<HTMLDivElement>("#split-resizer")!;
 const mountEl = document.querySelector<HTMLDivElement>("#editor")!;
@@ -101,7 +104,7 @@ function getExtensions(): Extension[] {
     bracketMatching(),
     indentUnit.of("  "),
     markdown(),
-    placeholderCompartment.of(placeholder(t("editor.placeholder"))),
+    placeholderCompartment.of(placeholder(t("editor.placeholder") || "开始输入…")),
     readOnlyCompartment.of(EditorState.readOnly.of(false)),
     EditorView.contentAttributes.of({
       spellcheck: "false",
@@ -129,36 +132,41 @@ function onDocChanged(
   startState: EditorState,
   newState: EditorState,
 ) {
-  let minLine = Number.POSITIVE_INFINITY;
-  let maxLine = -1;
+  let start = Number.POSITIVE_INFINITY;
+  let end = -1;
+  let endNew = -1;
   let hasNewlineChange = false;
+  const oldLen = startState.doc.length;
+  const newLen = newState.doc.length;
   changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     const oldSeg = startState.sliceDoc(fromA, toA);
     const newSeg = newState.sliceDoc(fromB, toB);
     if (oldSeg.includes("\n") || newSeg.includes("\n")) hasNewlineChange = true;
-    const a = startState.doc.lineAt(Math.min(fromA, startState.doc.length)).number - 1;
-    const b = newState.doc.lineAt(Math.min(Math.max(toB, 1), newState.doc.length)).number - 1;
-    if (a < minLine) minLine = a;
-    if (b > maxLine) maxLine = b;
+    adjustCountStats(startState, newState, fromA, toA, fromB, toB);
+    const a = startState.doc.lineAt(Math.min(fromA, oldLen)).number - 1;
+    const ao = startState.doc.lineAt(Math.min(Math.max(toA, 1), oldLen)).number - 1;
+    const bn = newState.doc.lineAt(Math.min(Math.max(toB, 1), newLen)).number - 1;
+    if (a < start) start = a;
+    if (ao > end) end = ao;
+    if (bn > endNew) endNew = bn;
   });
-  if (minLine === Number.POSITIVE_INFINITY) {
-    minLine = 0;
-    maxLine = newState.doc.lines - 1;
+  if (start === Number.POSITIVE_INFINITY) {
+    start = 0;
+    end = newState.doc.lines - 1;
+    endNew = end;
   } else {
     // 前后各多带一行：结构变化（如输入 ``` 开围栏）会影响相邻块的归属
-    minLine = Math.max(0, minLine - 1);
-    maxLine = Math.min(newState.doc.lines - 1, maxLine + 1);
+    start = Math.max(0, start - 1);
+    end = Math.min(startState.doc.lines - 1, end + 1);
+    endNew = Math.min(newState.doc.lines - 1, endNew + 1);
   }
-  deps?.onDocChange(
-    { start: minLine, end: maxLine, hasNewlineChange },
-    newState.doc.toString(),
-  );
+  deps?.onDocChange({ start, end, endNew, hasNewlineChange }, newState.doc);
 }
 
 export function updateEditorPlaceholder() {
   if (!view) return;
   view.dispatch({
-    effects: placeholderCompartment.reconfigure(placeholder(t("editor.placeholder"))),
+    effects: placeholderCompartment.reconfigure(placeholder(t("editor.placeholder") || "开始输入…")),
   });
 }
 
@@ -219,16 +227,55 @@ export function redo() {
   cmRedo(view);
 }
 
-/* ---------- 字数统计 ---------- */
+/* ---------- 字数统计（增量维护） ----------
+ * 字符/词数随每个事务就地增减对应区间，250ms 防抖只做一次 DOM 文本渲染，
+ * 不再每次全文 toString + 两个全文正则扫描。词数按词边界外扩后做区间内替换，
+ * 避免跨界的单词被漏计/重复计。 */
 let countTimer: number | undefined;
+let statChars = 0;
+let statWords = 0;
+const WORD_MATCH_RE = /[A-Za-z0-9_]+/g;
+
+function countWordsIn(s: string): number {
+  return (s.match(WORD_MATCH_RE) ?? []).length;
+}
+
+function expandToWordBounds(doc: EditorState["doc"], pos: number, dir: -1 | 1): number {
+  if (dir < 0) {
+    while (pos > 0 && /[A-Za-z0-9_]/.test(doc.sliceString(pos - 1, pos))) pos--;
+  } else {
+    while (pos < doc.length && /[A-Za-z0-9_]/.test(doc.sliceString(pos, pos + 1))) pos++;
+  }
+  return pos;
+}
+
+function adjustCountStats(
+  startState: EditorState,
+  newState: EditorState,
+  fromA: number,
+  toA: number,
+  fromB: number,
+  toB: number,
+) {
+  const removed = startState.sliceDoc(fromA, toA);
+  const inserted = newState.sliceDoc(fromB, toB);
+  statChars += inserted.replace(/\s/g, "").length - removed.replace(/\s/g, "").length;
+  const a0 = expandToWordBounds(startState.doc, fromA, -1);
+  const a1 = expandToWordBounds(startState.doc, toA, 1);
+  const b0 = expandToWordBounds(newState.doc, fromB, -1);
+  const b1 = expandToWordBounds(newState.doc, toB, 1);
+  statWords += countWordsIn(newState.sliceDoc(b0, b1)) - countWordsIn(startState.sliceDoc(a0, a1));
+}
+
+function setCountStatsFromText(text: string) {
+  statChars = text.replace(/\s/g, "").length;
+  statWords = countWordsIn(text);
+}
 
 export function updateCount() {
-  const text = getEditorText();
-  const chars = text.replace(/\s/g, "").length;
-  const words = (text.match(/[A-Za-z0-9_]+/g) ?? []).length;
-  const minutes = text.trim().length === 0 ? 0 : Math.max(1, Math.ceil(chars / 400));
-  const parts = [t("editor.count.chars", { count: chars })];
-  if (words > 0) parts.push(t("editor.count.words", { count: words }));
+  const minutes = statChars === 0 ? 0 : Math.max(1, Math.ceil(statChars / 400));
+  const parts = [t("editor.count.chars", { count: statChars })];
+  if (statWords > 0) parts.push(t("editor.count.words", { count: statWords }));
   if (minutes > 0) parts.push(t("editor.count.minutes", { count: minutes }));
   wordCountEl.textContent = parts.join(" · ");
 }
@@ -293,6 +340,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
   v.scrollDOM.scrollTop = 0;
   editorBodyEl.hidden = false;
+  editorMainEl.hidden = false;
   editorHeaderEl.hidden = false;
   toolbarEl.hidden = false;
   statusbarEl.hidden = false;
@@ -302,6 +350,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   editorTitleEl.title = pathHint || title;
   deps?.setPreviewVisible(state.viewMode !== "edit");
   deps?.refreshPreview();
+  setCountStatsFromText(content);
   updateCount();
   setSaveStatus("idle", "");
   if (state.viewMode !== "preview") v.focus();
@@ -327,10 +376,13 @@ export function closeEditor() {
   deps?.setPreviewVisible(false);
   deps?.refreshPreview();
   editorBodyEl.hidden = true;
+  editorMainEl.hidden = true;
   editorHeaderEl.hidden = true;
   toolbarEl.hidden = true;
   statusbarEl.hidden = true;
   editorEmptyEl.hidden = false;
+  statChars = 0;
+  statWords = 0;
   wordCountEl.textContent = "";
   setSaveStatus("idle", "");
 }

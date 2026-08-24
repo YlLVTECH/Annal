@@ -154,6 +154,23 @@ export function notifyPreviewLayoutChanged() {
   scheduleResync();
 }
 
+/** 跳转到指定源行（大纲面板点击）：预览模式滚预览区；编辑/分屏滚编辑器并放置光标，
+ *  分屏时两侧一起滚动（编辑区滚动事件带锁，不会自行触发预览联动） */
+export function scrollToLine(lineFloat: number) {
+  if (!editorView || !previewApi) return;
+  const v = editorView;
+  if (state.viewMode === "preview") {
+    scrollPreviewToLine(lineFloat);
+    return;
+  }
+  const lineNo = clamp(Math.floor(lineFloat) + 1, 1, v.state.doc.lines);
+  scrollEditorToLine(lineFloat);
+  if (state.viewMode === "split") scrollPreviewToLine(lineFloat);
+  const line = v.state.doc.line(lineNo);
+  v.dispatch({ selection: { anchor: line.from }, scrollIntoView: false });
+  if (!v.hasFocus) v.focus();
+}
+
 export function setScrollSyncSuspended(suspended: boolean) {
   syncSuspended = suspended;
   if (!suspended) scheduleResync();

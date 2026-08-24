@@ -1,12 +1,27 @@
 // Markdown 块级模型：把整篇文档切成顶层块，支持"只重渲染受影响块"的增量更新。
 // 渲染管线与旧版一致：marked（解析）+ DOMPurify（消毒）+ highlight.js（代码高亮，
-// 但只在块真正进入视口时才执行——离屏代码块不高亮）。
+// 但只在块真正进入视口时才执行——离屏代码块不高亮；highlight.js 首次用到时才加载）。
 // 本地图片通过 Tauri 的 asset 协议（convertFileSrc）加载。
+//
+// 增量策略（打字热路径不依赖整篇字符串）：
+// - 编辑器变更后不再把全文 toString 进来，模型按行号区间从编辑器 Text 上切片访问；
+// - 未插入/删除换行的单块编辑走"单块快速路径"；
+// - 换行变化（回车、删除合并、粘贴多行）走"块级 splice 重解析"：只对受影响块及其
+//   上下文窗口重新 lexer，验证窗口两端旧块逐字节复现后拼回，不再整篇重解析。
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import DOMPurify from "dompurify";
-import hljs from "highlight.js/lib/common";
 import { marked, type RendererObject, type Token, type Tokens } from "marked";
+
+/** 编辑器文档的最小接口（CodeMirror 的 Text 满足结构化类型）：
+ *  模型只通过按行/按区间的切片访问内容，避免每次按键整篇字符串化。 */
+export interface DocText {
+  readonly length: number;
+  readonly lines: number;
+  line(lineNumber: number): { from: number; to: number; text: string };
+  sliceString(from: number, to?: number): string;
+  toString(): string;
+}
 
 export interface MdBlock {
   /** 稳定 id：增量更新时尽量复用，虚拟预览用它跟踪 DOM 挂载 */
@@ -19,7 +34,7 @@ export interface MdBlock {
   endLine: number;
   /** 该块在源文本中的精确切片 */
   raw: string;
-  /** 内容指纹：内容变化时 key 变，跨全量重解析时据此复用旧块 */
+  /** 内容指纹：内容变化时 key 变，跨重解析时据此复用旧块 */
   key: string;
   /** 内容版本：内容每次变化 +1，虚拟预览据此判断"哪些块变了" */
   version: number;
@@ -253,10 +268,10 @@ function fallbackBlocks(src: string): MdBlock[] {
 let nextBlockId = 1;
 let blocks: MdBlock[] = [];
 let documentLineCount = 1;
-/** 最近一次全量解析得到的文档级链接定义（增量重解析单个块时注入 lexer） */
+/** 最近一次解析得到的文档级链接定义（增量重解析单个块时注入 lexer） */
 let docLinks: Record<string, Token> = {};
 
-/** 全量重解析（打开笔记 / 结构变化 / 兜底路径） */
+/** 全量重解析（打开笔记 / splice 验证失败兜底） */
 function fullParse(text: string) {
   documentLineCount = countNewlines(text) + 1;
   let tokens: Token[] = [];
@@ -279,6 +294,19 @@ function lexSnippet(raw: string, links: Record<string, Token>): Token[] {
     return lexer.lex(raw) as Token[];
   } catch {
     return marked.lexer(raw) as Token[];
+  }
+}
+
+/** 独立解析一段文本并取回其中的链接定义（块级 splice 重解析用） */
+function lexWindow(raw: string): { tokens: Token[]; links: Record<string, Token> } {
+  try {
+    const lexer = new marked.Lexer(undefined as never);
+    (lexer.tokens as unknown as { links: Record<string, Token> }).links = { ...docLinks };
+    const tokens = lexer.lex(raw) as Token[];
+    return { tokens, links: (tokens as { links?: Record<string, Token> }).links ?? {} };
+  } catch {
+    const tokens = marked.lexer(raw) as Token[];
+    return { tokens, links: (tokens as { links?: Record<string, Token> }).links ?? {} };
   }
 }
 
@@ -314,32 +342,46 @@ export function loadModel(text: string): MdBlock[] {
   return blocks;
 }
 
+/* ---------- 行工具（基于 DocText 切片，均为 O(log n)） ---------- */
+
+/** 0 起始行号 → 行首偏移（行号越界时返回文本末尾） */
+function lineStartOffset(doc: DocText, lineNo: number): number {
+  if (lineNo <= 0) return 0;
+  if (lineNo >= doc.lines) return doc.length;
+  return doc.line(lineNo + 1).from;
+}
+
+function getLineText(doc: DocText, lineNo: number): string {
+  if (lineNo < 0 || lineNo >= doc.lines) return "";
+  return doc.line(lineNo + 1).text;
+}
+
 /* ---------- 增量更新 ---------- */
 
 /**
  * 处理文档编辑：尽量只重建受影响的块，其余块仅平移行号。
- * - range 为 0 起始的源行闭区间（由 CodeMirror 的事务变更换算得到）。
+ * - range 为 0 起始的源行闭区间：start/end 用旧坐标定位旧块，endNew 为变更后的
+ *   结束行（新坐标，定位受影响区域 / 尾部追加用）。
  * - opts.newlineChange 表示本次编辑插入了或删除了换行：换行变化会改变顶层块的
- *   边界与归属（回车拆分段落、删除换行合并、空行分隔等），此时不信任快速路径，
- *   一律全量重解析。
- * - 命中单块快速路径时只重渲染那个块；否则全量重解析，但内容未变的块按 key
- *   复用原对象（保留 id / 版本 / 缓存 / 测量高度），虚拟预览因此不会重建它们的 DOM。
+ *   边界与归属（回车拆分段落、删除换行合并、空行分隔等），走"块级 splice 重解析"，
+ *   验证失败才回退整篇重解析。
  * 返回内容版本有变化的块 id 集合（这些块需要重新渲染）。
  */
 export function applyEdit(
-  text: string,
-  range: { start: number; end: number },
+  doc: DocText,
+  range: { start: number; end: number; endNew: number },
   opts?: { newlineChange?: boolean },
 ): Set<number> {
-  documentLineCount = countNewlines(text) + 1;
+  const oldLineCount = documentLineCount;
+  documentLineCount = doc.lines;
   const changed = new Set<number>();
   if (blocks.length === 0) {
-    fullParse(text);
+    fullParse(doc.toString());
     for (const b of blocks) changed.add(b.id);
     return changed;
   }
 
-  // 定位与编辑范围相交的块：快速路径要求整段变更落在同一个块内
+  // 定位与编辑范围相交的块（range.start 为旧坐标，与块行号同坐标系）
   let lo = 0;
   let hi = blocks.length - 1;
   let first = -1;
@@ -353,23 +395,22 @@ export function applyEdit(
     }
   }
   if (first < 0) {
-    // 变更发生在最后一个块之后（在文档末尾追加）——可能有新块，全量重解析
-    fullParse(text);
-    for (const b of blocks) changed.add(b.id);
-    return changed;
+    // 变更发生在最后一个块之后（在文档末尾追加）——尾部 splice：窗口只取最后一个
+    // 块，追加内容随窗口切片一起解析，避免整篇重解析
+    return spliceOrFullParse(doc, blocks.length - 1, blocks.length - 1, oldLineCount, changed, true);
   }
   let lastAffected = first;
   while (lastAffected + 1 < blocks.length && blocks[lastAffected + 1].startLine <= range.end) {
     lastAffected++;
   }
 
-  // 快速路径：单块 & 未触及结构化行 & 类型可安全增量 & 单块重解析结果一致
-  // 前提是本次编辑没有插入/删除换行（由编辑器根据字符差异判断传入）
+  // 快速路径：单块 & 未触及结构化行 & 类型可安全增量 & 单块重解析结果一致。
+  // 前提是本次编辑没有插入/删除换行（行号新旧坐标一致）。
   if (first === lastAffected && opts?.newlineChange !== true) {
     const b = blocks[first];
     let structural = false;
-    for (let ln = range.start; ln <= range.end; ln++) {
-      const lineText = getLine(text, ln);
+    for (let ln = range.start; ln <= range.endNew; ln++) {
+      const lineText = getLineText(doc, ln);
       if (isStructuralLine(lineText)) {
         structural = true;
         break;
@@ -377,7 +418,7 @@ export function applyEdit(
     }
     if (b.simple && !structural) {
       // 按旧行号切出该块的新内容；同行为准，去掉行尾换行以便与 marked 的 raw 对齐
-      let slice = text.slice(offsetOfLine(text, b.startLine), offsetOfLine(text, b.endLine + 1));
+      let slice = doc.sliceString(lineStartOffset(doc, b.startLine), lineStartOffset(doc, b.endLine + 1));
       if (slice.endsWith("\n")) slice = slice.slice(0, -1);
       let single: Token | null = null;
       try {
@@ -399,7 +440,130 @@ export function applyEdit(
     }
   }
 
-  // 全量重解析：内容未变的块按 key 复用对象
+  // 换行变化 / 多块变更：块级 splice 重解析（验证失败回退整篇）
+  return spliceOrFullParse(doc, first, lastAffected, oldLineCount, changed);
+}
+
+/**
+ * 块级 splice 重解析：把 [ctxFrom..ctxTo]（旧块下标闭区间）再向两侧各扩一个块作为
+ * 上下文，从编辑器 Text 上切出窗口切片重新 lexer；验证窗口两端旧块逐字节复现后，
+ * 只把窗口内结果拼回块数组并平移后续块行号。验证失败或窗口覆盖整篇时回退全量。
+ * `tail` 为尾部追加模式：窗口终点是文档末尾，追加内容位于旧最后块之后，只校验
+ * 窗口首块（旧最后块）复现即可，其余候选块都是新增内容。
+ */
+function spliceOrFullParse(
+  doc: DocText,
+  ctxFrom: number,
+  ctxTo: number,
+  oldLineCount: number,
+  changed: Set<number>,
+  tail = false,
+): Set<number> {
+  if (!tail) {
+    ctxFrom = Math.max(0, ctxFrom - 1);
+    ctxTo = Math.min(blocks.length - 1, ctxTo + 1);
+  }
+
+  // 窗口覆盖整篇：直接全量重解析（代价相同，还能完整重建文档级链接定义）
+  if (ctxFrom === 0 && ctxTo === blocks.length - 1) {
+    return replaceViaFullParse(doc.toString(), changed);
+  }
+  // 列表/引用的惰性续行会把窗口首块吞进上方块里，孤立窗口重解析无法校验这种
+  // 跨窗口合并——保守回退全量（正文编辑时这类相邻结构很罕见）。
+  if (ctxFrom > 0) {
+    const above = blocks[ctxFrom - 1].type;
+    if (above === "list" || above === "blockquote") {
+      return replaceViaFullParse(doc.toString(), changed);
+    }
+  }
+
+  // 窗口几何：从 ctxFrom 块首到 ctxTo 块之后（ctxTo 的新坐标起始行）或文档末尾
+  const lineDelta = doc.lines - oldLineCount;
+  const winStartOffset = lineStartOffset(doc, blocks[ctxFrom].startLine);
+  const winEndOffset =
+    ctxTo === blocks.length - 1 ? doc.length : lineStartOffset(doc, blocks[ctxTo].startLine + lineDelta);
+  const winSlice = doc.sliceString(winStartOffset, winEndOffset);
+
+  // 重新 lexer 窗口切片并重建候选块（与 buildBlocks 相同的拼接校验）
+  const { tokens, links } = lexWindow(winSlice);
+  if (links) docLinks = { ...docLinks, ...links }; // 合并窗口内新发现的链接定义
+  const cands: MdBlock[] = [];
+  let offset = 0;
+  let relLine = 0;
+  for (const token of tokens) {
+    if (token.type === "space" || token.type === "def") {
+      if (token.raw) {
+        offset += token.raw.length;
+        relLine += countNewlines(token.raw);
+      }
+      continue;
+    }
+    const raw = token.raw ?? "";
+    if (winSlice.slice(offset, Math.min(offset + raw.length, winSlice.length)) !== raw) {
+      return replaceViaFullParse(doc.toString(), changed);
+    }
+    cands.push(makeBlock(token, winSlice, offset, relLine));
+    offset += raw.length;
+    relLine += countNewlines(raw);
+  }
+  if (offset !== winSlice.length || cands.length === 0) {
+    return replaceViaFullParse(doc.toString(), changed);
+  }
+
+  // 校验窗口首块复现（保证窗口起始没有与上方块发生归属合并）；尾部模式窗口终点
+  // 是文档末尾，追加内容合法地位于旧最后块之后，无需校验"末块复现"。
+  const firstCand = cands[0];
+  if (firstCand.type !== blocks[ctxFrom].type || firstCand.raw !== blocks[ctxFrom].raw) {
+    return replaceViaFullParse(doc.toString(), changed);
+  }
+  if (!tail) {
+    const lastCand = cands[cands.length - 1];
+    if (lastCand.type !== blocks[ctxTo].type || lastCand.raw !== blocks[ctxTo].raw) {
+      return replaceViaFullParse(doc.toString(), changed);
+    }
+  }
+
+  // 行号对齐到绝对坐标
+  const winStartAbs = blocks[ctxFrom].startLine;
+  for (const c of cands) {
+    c.startLine += winStartAbs;
+    c.endLine += winStartAbs;
+  }
+  const oldEndAbs = blocks[ctxTo].endLine;
+  const shift = cands[cands.length - 1].endLine - oldEndAbs;
+
+  // 窗口内旧块按 key 复用（继承 id/版本/缓存/测量高度）；消失的旧块通知卸载
+  const oldWindow = blocks.slice(ctxFrom, ctxTo + 1);
+  const byKey = new Map<string, MdBlock>();
+  for (const b of oldWindow) byKey.set(b.key, b);
+  for (const c of cands) {
+    const old = byKey.get(c.key);
+    if (old) {
+      c.id = old.id;
+      c.version = old.version;
+      c.html = old.html;
+      c.hlDone = old.hlDone;
+      c.height = old.height;
+      c._token = undefined;
+    } else {
+      changed.add(c.id);
+    }
+  }
+  for (const b of oldWindow) {
+    if (!cands.some((c) => c.id === b.id)) changed.add(b.id);
+  }
+  blocks.splice(ctxFrom, ctxTo - ctxFrom + 1, ...cands);
+
+  // 平移窗口之后所有块的行号（行号变化只发生在窗口内）
+  for (let i = ctxFrom + cands.length; i < blocks.length; i++) {
+    blocks[i].startLine += shift;
+    blocks[i].endLine += shift;
+  }
+  return changed;
+}
+
+/** 全量重解析：内容未变的块按 key 复用对象 */
+function replaceViaFullParse(text: string, changed: Set<number>): Set<number> {
   const previous = new Map<string, MdBlock>();
   for (const b of blocks) previous.set(b.key, b);
   const oldOrder = blocks;
@@ -442,25 +606,6 @@ function updateSingleBlock(b: MdBlock, newRaw: string) {
   b._token = undefined;
 }
 
-/* ---------- 行工具 ---------- */
-
-function getLine(text: string, lineNo: number): string {
-  const start = offsetOfLine(text, lineNo);
-  const end = text.indexOf("\n", start);
-  return text.slice(start, end < 0 ? text.length : end);
-}
-
-/** 行首偏移（0 起始行号；行号越界时返回文本末尾） */
-export function offsetOfLine(text: string, lineNo: number): number {
-  let line = 0;
-  let i = 0;
-  while (line < lineNo && i < text.length) {
-    if (text.charCodeAt(i) === 10) line++;
-    i++;
-  }
-  return Math.min(i, text.length);
-}
-
 /* ---------- 块渲染 ---------- */
 
 /** 渲染并缓存单个块的消毒 HTML（代码块先给转义文本，挂载时再升级高亮） */
@@ -492,9 +637,25 @@ function blockToken(b: MdBlock): Token {
   throw new Error("block parse failed");
 }
 
-/** 代码块挂载进视口后调用：执行 highlight.js 高亮并更新缓存的 HTML */
-export function highlightBlock(b: MdBlock) {
+/* ---------- highlight.js 惰性加载 ----------
+ * 静态引入会执行全部 40 余种语言注册（即使笔记没有代码块），改为首次遇到
+ * 代码块时才 import（与 history.ts 里 diff 包的动态加载同一模式）。 */
+
+type HljsModule = typeof import("highlight.js/lib/common");
+let hljsPromise: Promise<HljsModule> | null = null;
+
+function ensureHljs(): Promise<HljsModule> {
+  hljsPromise ??= import("highlight.js/lib/common");
+  return hljsPromise;
+}
+
+/** 代码块挂载进视口后调用：首次加载 highlight.js，执行高亮并更新缓存的 HTML */
+export async function highlightBlock(b: MdBlock) {
   if (b.hlDone || !b.isCode) return;
+  const versionAtStart = b.version;
+  const hljs = (await ensureHljs()).default;
+  // 高亮加载期间块又被编辑：放弃过期结果，新版 renderBlockHtml 会重新走这条路径
+  if (b.hlDone || b.version !== versionAtStart) return;
   const token = blockToken(b) as Tokens.Code;
   const language = (token.lang ?? "").split(/\s+/)[0];
   const text = token.text ?? b.raw;

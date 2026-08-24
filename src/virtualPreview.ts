@@ -197,22 +197,24 @@ export function initVirtualPreview(container: HTMLElement, onLayoutChanged?: () 
     const el = document.createElement("div");
     el.className = `pv-block pv-${b.type}`;
     el.dataset.blockId = String(b.id);
-    // 含图片且尚无宽高比的块：为图片预留占位高度，避免加载时跳动
-    let imgNeedsPlaceholder = false;
-    if (b.hasImage) {
-      const tmp = document.createElement("div");
-      tmp.innerHTML = renderBlockHtml(b);
-      imgNeedsPlaceholder = Array.from(tmp.querySelectorAll("img")).some(
-        (img) => !img.hasAttribute("style"),
-      );
-    }
-    if (imgNeedsPlaceholder) el.classList.add("img-placeholder");
+    // 一次性解析渲染结果：含图片且尚无宽高比的块预留占位高度，避免加载时跳动
     el.innerHTML = renderBlockHtml(b);
+    if (
+      b.hasImage &&
+      Array.from(el.querySelectorAll("img")).some((img) => !img.hasAttribute("style"))
+    ) {
+      el.classList.add("img-placeholder");
+    }
     if (b.isCode && !b.hlDone) {
-      // 代码块在进入视口时才执行高亮（离屏代码块不高亮）
-      highlightBlock(b);
-      el.innerHTML = b.html;
-      el.classList.remove("img-placeholder");
+      // 代码块在进入视口时才执行高亮（离屏代码块不高亮）；highlight.js 首次用到
+      // 时才加载。完成后若该 DOM 仍挂载且块未被再次编辑，就地升级为高亮版。
+      void highlightBlock(b)
+        .catch(() => {})
+        .then(() => {
+          if (!el.isConnected) return;
+          const m = mounted.get(b.id);
+          if (m && m.el === el) el.innerHTML = b.html;
+        });
     }
     el.style.top = `${b.top}px`;
     return el;

@@ -32,13 +32,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use notify::{RecursiveMode, RecommendedWatcher, Watcher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
@@ -141,10 +142,41 @@ struct NoteVersion {
 /// 启动时由系统文件关联传入、等待前端取走的文件路径。
 struct PendingFiles(Mutex<Vec<String>>);
 
+/// 前端注册监听的目标目录集合（路径小写），与 notify watcher 实际监听目录 diff 增删。
+#[derive(Default)]
+struct WatchedDirs(Mutex<HashSet<String>>);
+
+/// 全局 notify watcher（由 setup 初始化；事件在后台线程统一去抖合并后通知前端）。
+static WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+
 /// 应用全局共享状态：内存中维护笔记元信息，并用互斥锁保证并发安全。
 struct AppState {
     index: Mutex<Vec<NoteMeta>>,
+    /// 索引自上次落盘以来是否有未持久化的修改（update_note 懒刷盘用）。
+    /// 内容类自动保存只更新 updated_at 等内存元信息，索引盘面合并去抖再写。
+    index_dirty: AtomicBool,
+    /// 全文搜索的内容缓存（按路径缓存正文，mtime/长度校验后复用）。
+    search_cache: Arc<Mutex<SearchCache>>,
 }
+
+/// 全文搜索内容缓存：命中后无需再整篇读盘 + 分配小写副本。
+struct SearchCache {
+    /// 路径（小写）→ 缓存条目
+    files: HashMap<String, SearchCacheEntry>,
+    /// 已缓存内容总字节数（超出上限时整表清空，简单可预期）
+    bytes: usize,
+}
+
+struct SearchCacheEntry {
+    mtime: SystemTime,
+    len: u64,
+    content: String,
+}
+
+/// 全文搜索内容缓存上限：超过后整表清空。
+const SEARCH_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+/// 单文件超过该字节数不缓存（仍逐次读取搜索，避免缓存挤爆内存）。
+const SEARCH_CACHE_FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -624,6 +656,45 @@ fn save_index(app: &tauri::AppHandle, metas: &[NoteMeta]) -> Result<(), String> 
     write_index(&index_path(app)?, metas)
 }
 
+/* ---------- 索引懒刷盘 ----------
+ * update_note（自动保存）只更新 updated_at 等内存元信息，不每次整体重写 index.json：
+ * 标记脏后由去抖线程合并落盘，切换/失焦/关窗（flush_index / close_ready）时立即冲刷。
+ * 结构类修改（新建/删除/改名/置顶/恢复等）仍然即时落盘，保证关键操作持久化。 */
+
+/// 索引懒刷盘去抖时长：合并连续自动保存期间的多次变更。
+const INDEX_FLUSH_DEBOUNCE_MS: u64 = 1000;
+
+/// 标记索引有未落盘修改并安排去抖刷盘（幂等：已有在途任务则不再开新线程）。
+/// 刷盘失败只影响 updated_at 等时间戳的持久化，正文文件不受影响。
+fn mark_index_dirty(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    if state.index_dirty.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(INDEX_FLUSH_DEBOUNCE_MS));
+        flush_pending_index(&handle);
+    });
+}
+
+/// 若索引有未落盘修改则写盘（幂等；去抖线程/失焦/关窗多处触发安全）。
+fn flush_pending_index(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    if !state.index_dirty.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    let snapshot = match state.index.lock() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    if let Err(e) = save_index(app, &snapshot) {
+        eprintln!("索引懒刷盘失败: {e}");
+        // 保留脏标记，下次触发时重试
+        state.index_dirty.store(true, Ordering::Release);
+    }
+}
+
 /// 列出全部笔记（置顶优先，同组按更新时间倒序）。
 #[tauri::command]
 async fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteMeta>, String> {
@@ -638,7 +709,60 @@ async fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteMeta>, 
     Ok(metas)
 }
 
+/// 以字节数组做 ASCII 大小写不敏感比较（非 ASCII 字节精确比较）。
+fn bytes_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
+}
+
+/// 统计 needle 在 hay 中的出现次数（ASCII 大小写不敏感；非 ASCII 精确匹配）。
+/// 旧实现先整篇 to_lowercase() 再查找，每文件两次全量分配；这里直接扫字节，
+/// 不产生小写副本。查询串本身已由调用方统一小写化。
+fn count_occurrences_ci(hay: &str, needle: &str) -> usize {
+    let (hb, nb) = (hay.as_bytes(), needle.as_bytes());
+    if nb.is_empty() || hb.len() < nb.len() {
+        return 0;
+    }
+    let mut count = 0usize;
+    let mut i = 0usize;
+    while i + nb.len() <= hb.len() {
+        if bytes_eq_ignore_ascii_case(&hb[i..i + nb.len()], nb) {
+            count += 1;
+            i += nb.len();
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
+/// 从缓存取正文；mtime/长度变化或未缓存则重新读盘。超过缓存上限的文件不缓存，
+/// 但仍正常返回本次内容供搜索。
+fn cached_or_read(cache: &mut SearchCache, path: &Path) -> Option<String> {
+    let key = path.to_string_lossy().to_ascii_lowercase();
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta.modified().unwrap_or(UNIX_EPOCH);
+    let len = meta.len();
+    if let Some(entry) = cache.files.get(&key) {
+        if entry.mtime == mtime && entry.len == len {
+            return Some(entry.content.clone());
+        }
+    }
+    let content = fs::read_to_string(path).ok()?;
+    if len <= SEARCH_CACHE_FILE_MAX_BYTES && content.len() <= SEARCH_CACHE_MAX_BYTES {
+        if cache.bytes + content.len() > SEARCH_CACHE_MAX_BYTES {
+            cache.files.clear();
+            cache.bytes = 0;
+        }
+        cache.bytes += content.len();
+        cache
+            .files
+            .insert(key, SearchCacheEntry { mtime, len, content: content.clone() });
+    }
+    Some(content)
+}
+
 /// 全文搜索笔记：标题命中权重高于正文命中，结果按权重降序排列。
+/// 正文按 (mtime, 长度) 缓存复用，连续输入搜索词不会反复整篇读盘。
 #[tauri::command]
 async fn search_notes(
     _app: tauri::AppHandle,
@@ -650,17 +774,19 @@ async fn search_notes(
         return Ok(vec![]);
     }
     let metas = state.index.lock().map_err(|e| e.to_string())?.clone();
+    let cache = state.search_cache.clone();
     // 文件 IO 放到阻塞线程池，不阻塞 async 运行时
     let results = tauri::async_runtime::spawn_blocking(move || {
+        let mut cache_guard = cache.lock().unwrap_or_else(|p| p.into_inner());
         let mut scored: Vec<(NoteMeta, i32)> = Vec::new();
         for meta in metas {
             let path = note_file(&meta);
             if !path.is_file() {
                 continue;
             }
-            let content = match fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
+            let content = match cached_or_read(&mut cache_guard, &path) {
+                Some(c) => c,
+                None => continue,
             };
             let title = meta.title.to_lowercase();
             let mut score = 0;
@@ -672,18 +798,9 @@ async fn search_notes(
                 }
             }
             // 正文命中：每出现一次 +1（上限 50 避免过长文档过度加权）
-            let mut count = 0;
-            let content_lower = content.to_lowercase();
-            let mut start = 0;
-            while let Some(pos) = content_lower[start..].find(&q) {
-                count += 1;
-                start += pos + q.len();
-                if start >= content_lower.len() {
-                    break;
-                }
-            }
+            let count = count_occurrences_ci(&content, &q);
             if count > 0 {
-                score += count.min(50);
+                score += count.min(50) as i32;
             }
             if score > 0 {
                 scored.push((meta, score));
@@ -806,6 +923,8 @@ async fn get_note(state: tauri::State<'_, AppState>, id: String) -> Result<Note,
 
 /// 保存笔记内容。标题不再随正文首行变化（笔记名 = 文件名，改名走 `rename_note`）；
 /// 这里只写正文、刷新更新时间与内容摘要。自动保存不记录版本。
+/// 正文写盘仍在索引锁内（保证 content_hash 与文件一致，且顺序可预期）；
+/// 索引盘面不再每次整体重写——标记脏 + 去抖懒刷，切换/失焦/关窗时冲刷。
 #[tauri::command]
 async fn update_note(
     app: tauri::AppHandle,
@@ -822,8 +941,15 @@ async fn update_note(
     // 先写正文（写失败则文件保持原状），再刷新内容摘要；标题保持不变
     write_note_content(meta, &content)?;
     let meta = meta.clone();
-    save_index(&app, &metas)?;
+    drop(metas);
+    mark_index_dirty(&app);
     Ok(meta)
+}
+
+/// 前端在失焦/隐藏/切换时调用：立即冲刷未落盘的索引修改。
+#[tauri::command]
+fn flush_index(app: tauri::AppHandle) {
+    flush_pending_index(&app);
 }
 
 /// 重命名一篇笔记：新名在全部笔记中唯一，磁盘文件同步改名为与名称一致（冲突自动加序号）。
@@ -1492,6 +1618,40 @@ fn pending_open_files(state: tauri::State<'_, PendingFiles>) -> Vec<String> {
     std::mem::take(&mut *state.0.lock().unwrap())
 }
 
+/// 同步文件监听：按笔记与打开文件的路径推导目标目录集合，与当前监听 diff 后增删
+/// （重复调用且集合未变时直接返回，不发 IPC 往返）。外部文件变更由 notify 统一
+/// 合并成 `fs-notes-changed` 事件，前端收到后执行一次同步（取代 3 秒轮询）。
+#[tauri::command]
+fn watch_note_dirs(
+    state: tauri::State<'_, WatchedDirs>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let mut dirs = state.0.lock().map_err(|e| e.to_string())?;
+    let mut wanted: HashSet<String> = HashSet::new();
+    for p in paths {
+        if let Some(parent) = Path::new(&p).parent() {
+            let key = parent.to_string_lossy().to_ascii_lowercase();
+            if !key.is_empty() {
+                wanted.insert(key);
+            }
+        }
+    }
+    if wanted == *dirs {
+        return Ok(());
+    }
+    let mut watcher = WATCHER.lock().map_err(|e| e.to_string())?;
+    if let Some(w) = watcher.as_mut() {
+        for dir in wanted.difference(&*dirs) {
+            let _ = w.watch(Path::new(dir), RecursiveMode::NonRecursive);
+        }
+        for dir in dirs.difference(&wanted) {
+            let _ = w.unwatch(Path::new(dir));
+        }
+    }
+    *dirs = wanted;
+    Ok(())
+}
+
 /// 将粘贴图片写入附件目录，返回实际保存路径（相对或绝对，前端按 Markdown 链接使用）。
 #[tauri::command]
 async fn save_pasted_image(
@@ -1509,6 +1669,8 @@ async fn save_pasted_image(
 /// 前端冲刷完未保存内容后调用，确认可以真正关闭窗口。
 #[tauri::command]
 fn close_ready(window: tauri::Window) {
+    // 关窗前冲刷未落盘的索引修改（懒刷盘去抖期间也保证时间戳等元信息持久化）
+    flush_pending_index(window.app_handle());
     let _ = window.destroy();
 }
 
@@ -1534,7 +1696,32 @@ pub fn run() {
             let metas = load_index(app.handle())?;
             app.manage(AppState {
                 index: Mutex::new(metas),
+                index_dirty: AtomicBool::new(false),
+                search_cache: Arc::new(Mutex::new(SearchCache {
+                    files: HashMap::new(),
+                    bytes: 0,
+                })),
             });
+            app.manage(WatchedDirs::default());
+            // 初始化文件监听：目录增删由 watch_note_dirs 命令控制；
+            // 事件在后台线程合并成 `fs-notes-changed`（外部文件变更的事件驱动同步入口）。
+            let handle = app.handle().clone();
+            let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+            match notify::recommended_watcher(tx) {
+                Ok(w) => {
+                    if let Ok(mut guard) = WATCHER.lock() {
+                        *guard = Some(w);
+                    }
+                    std::thread::spawn(move || {
+                        while rx.recv().is_ok() {
+                            // 合并风暴：排空积压后统一通知一次，前端只触发一次同步
+                            while rx.try_recv().is_ok() {}
+                            let _ = handle.emit("fs-notes-changed", ());
+                        }
+                    });
+                }
+                Err(e) => eprintln!("文件监听初始化失败: {e}"),
+            }
             Ok(())
         })
         .manage(PendingFiles(Mutex::new(pending)))
@@ -1561,6 +1748,8 @@ pub fn run() {
             files_exist,
             sync_fs_state,
             pending_open_files,
+            watch_note_dirs,
+            flush_index,
             save_pasted_image,
             close_ready
         ])
@@ -1645,6 +1834,7 @@ mod tests {
             path: dir.join("计划.md").to_string_lossy().into_owned(),
             content_hash: String::new(),
             title_locked: true,
+            pinned: false,
         };
         let metas = vec![other];
         let (title, path) = resolve_note_target(&metas, "", &cur, "计划");

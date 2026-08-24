@@ -34,7 +34,7 @@ export default defineConfig(async () => ({
             "@codemirror/state",
             "@codemirror/view",
           ],
-          highlight: ["highlight.js"],
+          // highlight.js 已改为首次遇到代码块时动态 import，交给 Rollup 自动分包
           markdown: ["marked", "dompurify"],
           diff: ["diff"],
         },

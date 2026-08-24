@@ -1,15 +1,94 @@
 type TranslateParams = Record<string, string | number>;
 
-let currentLocale = (localStorage.getItem("notebook:locale") as string | null) ?? "zh-CN";
-let currentMessages: Record<string, string> = {};
+const DEFAULT_LOCALE = "zh-CN";
+
+/** 默认回退消息：i18n 加载失败时至少保证核心文案可见 */
+const DEFAULT_MESSAGES: Record<string, string> = {
+  "editor.placeholder": "开始输入…",
+  "editor.count.chars": "{count} 字符",
+  "editor.count.words": "{count} 词",
+  "editor.count.minutes": "约 {count} 分钟",
+  "editor.command.h1": "标题 1",
+  "editor.command.h2": "标题 2",
+  "editor.command.h3": "标题 3",
+  "editor.command.bold": "粗体",
+  "editor.command.italic": "斜体",
+  "editor.command.strike": "删除线",
+  "editor.command.quote": "引用",
+  "editor.command.code": "行内代码",
+  "editor.command.ul": "无序列表",
+  "editor.command.ol": "有序列表",
+  "editor.command.task": "任务",
+  "editor.linkPlaceholder": "链接文本",
+  "editor.codePlaceholder": "代码",
+  "editor.imageFallback": "图片",
+  "editor.insertImage": "插入图片",
+  "editor.images": "图片",
+  "editor.missing.deleted": "文件已删除",
+  "editor.missing.note": "笔记不存在",
+  "status.saving": "保存中…",
+  "status.saved": "已保存",
+  "status.error.save": "保存失败",
+  "status.renameSuccess": "已重命名：{title}",
+  "status.versionRestored": "版本已恢复",
+  "status.versionRestoredOther": "「{title}」已恢复",
+  "status.externalRename": "外部重命名：{title}",
+  "paste.imageFail": "图片粘贴失败：{count} 张",
+  "paste.imageInserted": "已插入 {inserted} 张，{failed} 张失败",
+  "find.placeholder": "查找…",
+  "find.replacePlaceholder": "替换为…",
+  "history.title.default": "未命名笔记",
+  "history.titleAtVersion": "{title}",
+  "history.versionLabel": "版本 {seq}",
+  "history.latest": "最新",
+  "history.latestBadge": "最新",
+  "history.compare": "对比",
+  "history.exitCompare": "退出对比",
+  "history.compareMeta": "{from} → v{seq} · {time}",
+  "history.versionsCount": "{count} 个版本",
+  "history.diffEmpty": "无差异",
+  "history.compareFail": "对比失败：{error}",
+  "history.loading": "加载中…",
+  "history.empty": "暂无历史版本",
+  "history.readFail": "读取失败：{error}",
+  "confirm.okDefault": "确定",
+  "commit.confirmText": "提交「{title}」的当前版本？",
+  "commit.success": "已提交 v{seq}{message}",
+  "commit.unchanged": "内容未变更，无需提交",
+  "commit.fail": "提交失败：{error}",
+  "contextMenu.closeFile": "关闭文件",
+  "contextMenu.newNote": "新建笔记",
+  "contextMenu.pin": "置顶",
+  "sidebar.deleted": "已删除",
+  "sidebar.page.info": "{current} / {total}",
+  "sidebar.searching": "搜索中…",
+  "sidebar.noMatch": "无匹配结果",
+  "sidebar.empty.title": "暂无笔记",
+  "sidebar.empty.sub": "点击「新建笔记」或打开 Markdown 文件开始使用",
+  "sidebar.empty.subWithOpen": "或打开现有 Markdown 文件",
+  "sidebar.renameFail": "重命名失败：{error}",
+  "sidebar.group.notes": "笔记",
+  "settings.about": "关于",
+  "titlebar.openFile": "打开 Markdown 文件",
+  "titlebar.collapseSidebar": "收起侧栏",
+  "titlebar.toggleTheme": "切换明暗主题",
+  "app.title": "笔记本",
+  "outline.title": "大纲",
+  "outline.empty": "暂无标题",
+  "outline.toggle": "显示 / 隐藏大纲",
+};
+
+let currentLocale = (localStorage.getItem("notebook:locale") as string | null) ?? DEFAULT_LOCALE;
+let currentMessages: Record<string, string> = { ...DEFAULT_MESSAGES };
 
 async function loadMessages(locale: string): Promise<Record<string, string>> {
   try {
     const res = await fetch(`/i18n/${locale}.json`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Failed to load ${locale}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load ${locale}`);
     const data = (await res.json()) as Record<string, string>;
     return data;
-  } catch {
+  } catch (err) {
+    console.error(`[i18n] Failed to load locale "${locale}", falling back to defaults:`, err);
     return {};
   }
 }
@@ -24,7 +103,7 @@ export function getLocale(): string {
 }
 
 export function t(key: string, params?: TranslateParams): string {
-  let text = currentMessages[key] ?? key;
+  let text = currentMessages[key] ?? DEFAULT_MESSAGES[key] ?? key;
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));

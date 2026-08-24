@@ -294,18 +294,6 @@ export function renderList() {
       path.title = f.path;
 
       li.append(title, path);
-      li.addEventListener("click", (e) => {
-        if (li.classList.contains("renaming")) return;
-        const key = f.path;
-        if (e.ctrlKey || e.metaKey) {
-          toggleSelect(key);
-        } else if (e.shiftKey && state.rangeAnchorId) {
-          selectRange(key);
-        } else {
-          clearSelection();
-          if (onSelectSourceCallback) void onSelectSourceCallback({ kind: "file", path: f.path });
-        }
-      });
       frag.appendChild(li);
     }
   }
@@ -338,18 +326,6 @@ export function renderList() {
       time.textContent = fmtTime(n.updatedAt);
 
       li.append(title, time);
-      li.addEventListener("click", (e) => {
-        if (li.classList.contains("renaming")) return;
-        const key = n.id;
-        if (e.ctrlKey || e.metaKey) {
-          toggleSelect(key);
-        } else if (e.shiftKey && state.rangeAnchorId) {
-          selectRange(key);
-        } else {
-          clearSelection();
-          if (onSelectSourceCallback) void onSelectSourceCallback({ kind: "note", id: n.id });
-        }
-      });
       frag.appendChild(li);
     }
   }
@@ -474,9 +450,29 @@ export function initSidebar(
     if (onContextMenuCallback) onContextMenuCallback(e);
   });
 
-  // 点击列表空白处清除选择
+  // 列表点击统一委托：条目选择/多选/打开 + 空白处清除选择（不再逐条挂监听器）
   noteListEl.addEventListener("click", (e) => {
-    if (e.target === noteListEl) clearSelection();
+    const target = e.target as HTMLElement;
+    if (target === noteListEl) {
+      clearSelection();
+      return;
+    }
+    const li = target.closest<HTMLLIElement>(".note-item");
+    if (!li || li.classList.contains("renaming")) return;
+    const key = getItemKey(li);
+    if (!key) return;
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelect(key);
+    } else if (e.shiftKey && state.rangeAnchorId) {
+      selectRange(key);
+    } else {
+      clearSelection();
+      if (li.dataset.noteId) {
+        if (onSelectSourceCallback) void onSelectSourceCallback({ kind: "note", id: li.dataset.noteId });
+      } else if (li.dataset.filePath) {
+        if (onSelectSourceCallback) void onSelectSourceCallback({ kind: "file", path: li.dataset.filePath });
+      }
+    }
   });
 
   pagePrevBtn.addEventListener("click", () => {

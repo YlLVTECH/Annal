@@ -1,14 +1,16 @@
 /* ============ 主题变量 ============ */
 /* 现代极简：黑白灰为主，单一克制强调色，扁平化 */
 :root {
-  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun",
-    "PMingLiU", "Times New Roman", serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 
   --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, SFMono-Regular,
     Menlo, "Courier New", monospace;
+  /* 界面字体：默认衬线，可在设置 -> 外观切换（见下方 data-font-family 覆盖） */
+  --font-ui: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun",
+    "PMingLiU", "Times New Roman", serif;
 
   --bg-app: #f6f6f4;
   --bg-pane: #ffffff;
@@ -69,6 +71,12 @@
   --hl-add-bg: #f0fff4;
   --hl-del: #b31d28;
   --hl-del-bg: #ffeef0;
+}
+
+/* 界面字体切换（设置 -> 外观）：无衬线覆盖 --font-ui */
+:root[data-font-family="sans"] {
+  --font-ui: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC",
+    sans-serif;
 }
 
 html[data-theme="dark"] {
@@ -348,6 +356,48 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   transition: background-color 0.18s ease, border-color 0.18s ease;
 }
 
+/* ---------- 侧栏标签栏（笔记 / 大纲切换） ---------- */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 9px 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.sidebar-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.sidebar-tab:hover:not(.active) {
+  color: var(--text);
+}
+
+/* ---------- 侧栏面板容器 ---------- */
+.sidebar-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-pane[hidden] {
+  display: none !important;
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -359,60 +409,63 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 5px 10px 5px 14px;
   background: var(--bg-pane);
   border-bottom: 1px solid var(--border-soft);
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.03);
 }
 
 .batch-info {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .batch-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 2px;
 }
 
+/* 轻量文字按钮：窄侧栏里避免多个实心/描边按钮挤在一起 */
 .batch-btn {
   border: none;
   border-radius: var(--radius-sm);
-  padding: 4px 10px;
+  padding: 4px 8px;
   font-size: 12px;
   font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
-  line-height: 1.4;
+}
+
+.batch-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .batch-btn-primary {
-  background: var(--accent);
-  color: #fff;
+  color: var(--accent);
 }
 
 .batch-btn-primary:hover {
-  background: var(--accent-hover, var(--accent));
+  background: var(--accent-soft);
+  color: var(--accent-hover);
 }
 
 .batch-btn-danger {
-  background: transparent;
   color: var(--danger);
-  border: 1px solid var(--danger);
 }
 
 .batch-btn-danger:hover {
   background: var(--danger-soft, rgba(220, 38, 38, 0.07));
   color: var(--danger-hover, var(--danger));
-}
-
-.batch-btn-secondary {
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border-soft);
 }
 
 .batch-btn-secondary:hover {
@@ -463,7 +516,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 }
 
 .sidebar-search {
-  padding: 2px 14px 10px;
+  padding: 2px 8px 4px;
 }
 
 .search-box {
@@ -481,26 +534,31 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   pointer-events: none;
 }
 
+/* 融入式搜索框：平时与列表融为一体，悬停/聚焦时才浮出底色 */
 #search-input {
   width: 100%;
-  height: 32px;
+  height: 30px;
   padding: 0 10px 0 30px;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--bg-pane);
+  background: transparent;
   color: var(--text);
   font-size: 13px;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.18s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 #search-input::placeholder {
   color: var(--text-faint);
 }
 
+#search-input:hover {
+  background: var(--bg-hover);
+}
+
 #search-input:focus {
+  background: var(--bg-pane);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
 }
 
 #note-list {
@@ -1119,7 +1177,7 @@ body.sidebar-auto-hidden #editor-header {
 
 /* 分屏空笔记时的编辑区提示由 CodeMirror 的 placeholder 扩展提供（详见 editor.ts） */
 
-/* ---------- 大纲面板（编辑器右侧目录树） ---------- */
+/* ---------- 大纲面板（侧栏内嵌面板） ---------- */
 #editor-main {
   flex: 1;
   display: flex;
@@ -1127,32 +1185,13 @@ body.sidebar-auto-hidden #editor-header {
   min-width: 0;
 }
 
-#outline {
-  width: 218px;
-  flex-shrink: 0;
+#outline-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--border-soft);
   background: var(--bg-pane);
+  border-top: 1px solid var(--border-soft);
   transition: background-color 0.18s ease, border-color 0.18s ease;
-}
-
-.outline-header {
-  display: flex;
-  align-items: center;
-  height: 40px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border-soft);
-  flex-shrink: 0;
-  transition: border-color 0.18s ease;
-}
-
-.outline-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
 }
 
 .outline-body {
@@ -1202,19 +1241,7 @@ body.sidebar-auto-hidden #editor-header {
   text-align: center;
 }
 
-/* 工具栏大纲开关：激活（面板可见）时强调色 */
-#outline-toggle.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
 
-/* 中窄屏空间紧张，隐藏大纲面板与开关，避免挤压编辑区 */
-@media (max-width: 720px) {
-  #outline,
-  #outline-toggle {
-    display: none !important;
-  }
-}
 
 /* 内容密度：宽窗口随容器扩展，分屏时使用更小的面板内边距 */
 :root {
@@ -1340,7 +1367,7 @@ body.sidebar-auto-hidden #editor-header {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-overlay);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12.5px;
   color: var(--text);
   box-sizing: border-box;
@@ -1465,6 +1492,35 @@ body.sidebar-auto-hidden #editor-header {
   background: var(--bg-selection);
   outline: 1px solid var(--accent);
   border-radius: 2px;
+}
+
+/* 大纲点击跳转：目标标题行短暂高亮后淡出（类由 editor.ts 定时移除） */
+@keyframes outline-flash {
+  0%, 35% {
+    background-color: var(--accent-soft);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+#editor .cm-editor .cm-line.cm-outline-flash {
+  animation: outline-flash 1.2s ease forwards;
+}
+
+/* 大纲跳转：预览区目标块短暂高亮后淡出（类由 virtualPreview.ts 定时移除） */
+@keyframes preview-flash {
+  0%, 35% {
+    background-color: var(--accent-soft);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+#preview .pv-block.pv-flash {
+  border-radius: var(--radius-sm);
+  animation: preview-flash 1.2s ease forwards;
 }
 
 /* 深色模式：面板底色更贴近 VSCode 暗色 */
@@ -2102,6 +2158,22 @@ body.resizing #preview {
 
 .ctx-item.danger:hover {
   background: var(--danger-soft);
+}
+
+.ctx-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-soft);
+}
+
+.ctx-shortcut {
+  margin-left: auto;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1;
+  pointer-events: none;
 }
 
 /* ============ 智能表格插入弹层 ============ */

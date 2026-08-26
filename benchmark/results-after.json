@@ -1,0 +1,28 @@
+{
+  "arch": "after-direct-hot-path",
+  "meta": {
+    "time": "2026-08-25T16:46:54.315Z",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCode/3.9.1 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+    "viewport": "1440x900",
+    "dpr": 1,
+    "docMedium": "12044 字符 / 599 行",
+    "docLarge": "67094 字符 / 3120 行",
+    "note": "退化的每键通用事件总线已回退为 pipeline 同步直连。同步场景与 results-before.json 同口径。渲染相关场景仍受 IAB rAF 口径限制，不计算跨轮百分比。"
+  },
+  "scenarios": {
+    "init_cold": { "n": 1, "unit": "ms", "mean": 5.2, "median": 5.2, "p95": 5.2, "min": 5.2, "max": 5.2 },
+    "openDoc_medium": { "n": 12, "unit": "ms", "mean": 7.292, "median": 7, "p95": 8.7, "min": 5.7, "max": 9 },
+    "openDoc_large": { "n": 8, "unit": "ms", "mean": 11.612, "median": 7.6, "p95": 16.5, "min": 6, "max": 18.2 },
+    "typeSync_medium": { "n": 48, "unit": "ms", "mean": 3.221, "median": 3, "p95": 4.8, "min": 2.1, "max": 6.6 },
+    "typeSync_large": { "n": 48, "unit": "ms", "mean": 10.398, "median": 10.2, "p95": 11.4, "min": 9.3, "max": 16.6 },
+    "typeSync_tail": { "n": 48, "unit": "ms", "mean": 2.219, "median": 2, "p95": 2.9, "min": 1.8, "max": 4.4 },
+    "enterSync_medium": { "n": 24, "unit": "ms", "mean": 2.675, "median": 2.4, "p95": 3.4, "min": 2.1, "max": 3.8 },
+    "typePaint_medium": { "n": 16, "unit": "ms", "mean": 2.581, "median": 2.3, "p95": 3.2, "min": 2, "max": 4.7 },
+    "viewSwitch_large": { "n": 12, "unit": "ms", "mean": 1.358, "median": 0.7, "p95": 2.9, "min": 0.2, "max": 3.8 },
+    "previewScroll_large": { "n": 20, "unit": "ms", "mean": 0.01, "median": 0, "p95": 0.1, "min": 0, "max": 0.1 },
+    "editorScroll_large": { "n": 20, "unit": "ms", "mean": 0.01, "median": 0, "p95": 0.1, "min": 0, "max": 0.1 },
+    "listUpdate_serial": { "n": 20, "unit": "ms", "mean": 1.725, "median": 1.5, "p95": 2.5, "min": 1.3, "max": 2.8 },
+    "listUpdate_burst_sync": { "n": 1, "unit": "ms", "mean": 0.4, "median": 0.4, "p95": 0.4, "min": 0.4, "max": 0.4 },
+    "listUpdate_burst_total": { "n": 1, "unit": "ms", "mean": 3.3, "median": 3.3, "p95": 3.3, "min": 3.3, "max": 3.3 }
+  }
+}

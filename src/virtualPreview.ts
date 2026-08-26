@@ -26,10 +26,14 @@ export interface PreviewApi {
   setVisible(visible: boolean): void;
   /** 模型内容/结构变化后刷新；changedIds 为内容变化的块（挂载中的会被重建） */
   refresh(changedIds?: Set<number>): void;
+  /** 切换文档时重置：卸载全部块并回到顶部（新文档的块 id 从 1 重排，旧挂载表不可复用） */
+  reset(): void;
   /** 布局可能失效（字号/密度/宽度变化）时强制重排 */
   markLayoutDirty(): void;
   /** 行号（浮点，含块内进度）→ 预览内容坐标 y */
   mapLineToY(lineFloat: number): number;
+  /** 大纲跳转：闪烁高亮包含该行的块（等待下一轮渲染后挂载完成再执行） */
+  flashAtLine(lineFloat: number): void;
   /** 预览内容坐标 y → 行号（浮点） */
   mapYToLine(y: number): number;
   /** 当前总内容高度 */
@@ -191,6 +195,7 @@ export function initVirtualPreview(container: HTMLElement, onLayoutChanged?: () 
       onLayoutChanged?.();
     }
     syncMountedPositions(byId);
+    if (pendingFlashLine !== null) runPendingFlash(pendingFlashLine);
   }
 
   function mountBlock(b: MdBlock): HTMLElement {
@@ -306,6 +311,17 @@ export function initVirtualPreview(container: HTMLElement, onLayoutChanged?: () 
     scheduleRender();
   }
 
+  /** 文档切换：块 id 从 1 重排，与旧挂载表必然冲突，必须整体卸载后按新文档重建 */
+  function reset() {
+    unmountAll();
+    rebuildSet.clear();
+    layoutDirty = true;
+    container.scrollTop = 0;
+    if (!visible) return;
+    layout();
+    scheduleRender();
+  }
+
   function setVisible(v: boolean) {
     if (visible === v) return;
     visible = v;
@@ -395,12 +411,55 @@ export function initVirtualPreview(container: HTMLElement, onLayoutChanged?: () 
     return total;
   }
 
+  /* ---------- 大纲跳转：目标块闪烁高亮 ---------- */
+  let pendingFlashLine: number | null = null;
+  let flashCleanupTimer = 0;
+
+  /** 目标块可能尚未挂载（在视口外）：记下行号，待本轮渲染完成后再高亮 */
+  function flashAtLine(lineFloat: number): void {
+    if (!visible) return;
+    pendingFlashLine = lineFloat;
+    scheduleRender();
+  }
+
+  function runPendingFlash(lineFloat: number) {
+    pendingFlashLine = null;
+    const list = getBlocks();
+    const line = Math.floor(lineFloat);
+    // 最后一个 startLine <= line 的块；行落在块间空行区则不高亮
+    let lo = 0;
+    let hi = list.length - 1;
+    let ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid].startLine <= line) {
+        ans = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (ans < 0 || line > list[ans].endLine) return;
+    const el = mounted.get(list[ans].id)?.el;
+    if (!el) return;
+    el.classList.remove("pv-flash");
+    void el.offsetWidth; // 强制回流以重置动画
+    el.classList.add("pv-flash");
+    window.clearTimeout(flashCleanupTimer);
+    flashCleanupTimer = window.setTimeout(() => {
+      flashCleanupTimer = 0;
+      el.classList.remove("pv-flash");
+    }, 1300);
+  }
+
   return {
     element: container,
     setVisible,
     refresh,
+    reset,
     markLayoutDirty,
     mapLineToY,
+    flashAtLine,
     mapYToLine,
     totalHeight,
   };

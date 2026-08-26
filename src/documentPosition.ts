@@ -7,7 +7,7 @@
 // 因此同步就是一次跳跃式写入，滚动期间逐帧执行也不会拖慢主线程。
 
 import type { EditorView } from "@codemirror/view";
-import { state } from "./state";
+import { viewMode } from "./state";
 import type { PreviewApi } from "./virtualPreview";
 
 export interface SyncDeps {
@@ -82,7 +82,7 @@ function scrollPreviewToLine(lineFloat: number) {
 
 /* ---------- 双向同步 ---------- */
 function syncEditorToPreview() {
-  if (!editorView || !previewApi || state.viewMode !== "split" || syncSuspended) return;
+  if (!editorView || !previewApi || viewMode.get() !== "split" || syncSuspended) return;
   const v = editorView;
   if (v.state.doc.length === 0) return;
   const lineFloat = editorTopToLineFloat();
@@ -90,7 +90,7 @@ function syncEditorToPreview() {
 }
 
 function syncPreviewToEditor() {
-  if (!editorView || !previewApi || state.viewMode !== "split" || syncSuspended) return;
+  if (!editorView || !previewApi || viewMode.get() !== "split" || syncSuspended) return;
   const lineFloat = previewTopToLineFloat();
   scrollEditorToLine(lineFloat);
 }
@@ -115,12 +115,12 @@ export function initScrollSync(deps: SyncDeps) {
   const pv = previewApi.element;
 
   ed.addEventListener("scroll", () => {
-    if (state.viewMode !== "split" || syncSuspended || isLocked(ed)) return;
+    if (viewMode.get() !== "split" || syncSuspended || isLocked(ed)) return;
     activeSide = "editor";
     schedule();
   });
   pv.addEventListener("scroll", () => {
-    if (state.viewMode !== "split" || syncSuspended || isLocked(pv)) return;
+    if (viewMode.get() !== "split" || syncSuspended || isLocked(pv)) return;
     activeSide = "preview";
     schedule();
   });
@@ -139,7 +139,7 @@ export function notifyEditorActivity() {
 
 /** 拆分屏状态重新同步（视图切换、布局变化后调用） */
 export function scheduleResync() {
-  if (!editorView || !previewApi || state.viewMode !== "split" || syncSuspended) return;
+  if (!editorView || !previewApi || viewMode.get() !== "split" || syncSuspended) return;
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
@@ -150,7 +150,7 @@ export function scheduleResync() {
 
 /** 预览布局刷新（块重渲染/重测高度）后需要重新对齐时调用 */
 export function notifyPreviewLayoutChanged() {
-  if (state.viewMode !== "split" || syncSuspended) return;
+  if (viewMode.get() !== "split" || syncSuspended) return;
   scheduleResync();
 }
 
@@ -159,13 +159,13 @@ export function notifyPreviewLayoutChanged() {
 export function scrollToLine(lineFloat: number) {
   if (!editorView || !previewApi) return;
   const v = editorView;
-  if (state.viewMode === "preview") {
+  if (viewMode.get() === "preview") {
     scrollPreviewToLine(lineFloat);
     return;
   }
   const lineNo = clamp(Math.floor(lineFloat) + 1, 1, v.state.doc.lines);
   scrollEditorToLine(lineFloat);
-  if (state.viewMode === "split") scrollPreviewToLine(lineFloat);
+  if (viewMode.get() === "split") scrollPreviewToLine(lineFloat);
   const line = v.state.doc.line(lineNo);
   v.dispatch({ selection: { anchor: line.from }, scrollIntoView: false });
   if (!v.hasFocus) v.focus();

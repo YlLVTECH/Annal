@@ -3,12 +3,13 @@
 //   无需单独解析源码；ATX 与 setext 两种写法的标题都能识别。
 // - 点击条目跳转到对应源行：编辑/分屏模式滚编辑器并放置光标，预览模式滚预览区。
 // - 随编辑器/预览滚动高亮当前所在章节。
-// - 面板显隐由工具栏按钮控制，偏好持久化在 localStorage（notebook:outline）。
+// - 刷新由管线事件驱动（model:changed / doc:loaded / doc:closed），打字时 200ms 防抖合并。
 
 import type { EditorView } from "@codemirror/view";
+import { bus } from "./events";
 import { scrollToLine } from "./documentPosition";
 import { getBlocks, type MdBlock } from "./markdownModel";
-import { state } from "./state";
+import { current, viewMode } from "./state";
 import type { PreviewApi } from "./virtualPreview";
 
 interface OutlineEntry {
@@ -25,12 +26,13 @@ interface OutlineEntry {
 export interface OutlineDeps {
   getEditorView: () => EditorView;
   getPreview: () => PreviewApi;
+  /** 点击跳转后闪烁高亮编辑器中的目标标题行 */
+  flashHeading: (lineNo: number) => void;
 }
 
-const outlinePanelEl = document.querySelector<HTMLElement>("#outline")!;
+const outlinePanelEl = document.querySelector<HTMLElement>("#outline-pane")!;
 const outlineListEl = document.querySelector<HTMLUListElement>("#outline-list")!;
 const outlineEmptyEl = document.querySelector<HTMLElement>("#outline-empty")!;
-const outlineToggleBtn = document.querySelector<HTMLButtonElement>("#outline-toggle")!;
 
 const OUTLINE_KEY = "notebook:outline";
 /** 大纲面板刷新防抖：打字时合并多次文档变更，避免每键全量重建目录树 */
@@ -94,16 +96,6 @@ function collectEntries(): OutlineEntry[] {
 
 /* ---------- 渲染 ---------- */
 
-/** 按本地偏好与当前编辑对象同步面板显隐与开关按钮状态，返回面板是否可见 */
-function syncVisibility(): boolean {
-  const enabled = isOutlineEnabled();
-  const visible = enabled && state.current !== null;
-  outlineToggleBtn.classList.toggle("active", enabled);
-  outlineToggleBtn.setAttribute("aria-pressed", String(enabled));
-  outlinePanelEl.hidden = !visible;
-  return visible;
-}
-
 /** 条目签名：文本/级别/行号任一变化都触发重建，纯打字（标题没变）时复用 DOM */
 function entriesSignature(list: OutlineEntry[]): string {
   let sig = "";
@@ -112,7 +104,13 @@ function entriesSignature(list: OutlineEntry[]): string {
 }
 
 function render() {
-  if (!syncVisibility()) return;
+  if (!deps) return;
+  if (current.get() === null) {
+    outlineListEl.innerHTML = "";
+    outlineEmptyEl.hidden = false;
+    if (activeEl) { activeEl.classList.remove("active"); activeEl = null; }
+    return;
+  }
   const newEntries = collectEntries();
   const sig = entriesSignature(newEntries);
   if (sig === lastSignature && lastHadItems === (newEntries.length > 0)) {
@@ -155,6 +153,9 @@ function onItemClick(e: Event) {
   const line = Number(li.dataset.line);
   if (!Number.isFinite(line)) return;
   scrollToLine(line);
+  // 预览模式闪烁高亮预览块；编辑/分屏只闪烁编辑器标题行
+  if (viewMode.get() === "preview") deps?.getPreview().flashAtLine(line);
+  else deps?.flashHeading(Math.floor(line) + 1);
   updateActive();
 }
 
@@ -163,7 +164,7 @@ function viewportTopLine(): number {
   if (!deps) return -1;
   const v = deps.getEditorView();
   const p = deps.getPreview();
-  if (state.viewMode === "preview") return p.mapYToLine(p.element.scrollTop);
+  if (viewMode.get() === "preview") return p.mapYToLine(p.element.scrollTop);
   if (v.state.doc.lines === 0) return -1;
   const docY = v.scrollDOM.scrollTop + 1;
   const block = v.lineBlockAtHeight(docY);
@@ -192,10 +193,43 @@ function updateActive() {
 export function initOutline(outlineDeps: OutlineDeps) {
   deps = outlineDeps;
   outlineListEl.addEventListener("click", onItemClick);
-  outlineToggleBtn.addEventListener("click", () => {
-    localStorage.setItem(OUTLINE_KEY, isOutlineEnabled() ? "0" : "1");
-    render();
+  // 大纲面板无自定义右键菜单，屏蔽 WebView 原生菜单
+  outlinePanelEl.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // 管线事件驱动刷新：编辑增量（防抖合并）/ 打开 / 关闭
+  bus.on("doc:closed", refreshOutline);
+
+  // Wire sidebar tab switching (笔记 / 大纲)
+  const tabBtns = document.querySelectorAll<HTMLElement>(".sidebar-tab");
+  const filesPane = document.querySelector<HTMLElement>("#files-pane")!;
+  const outlinePane = document.querySelector<HTMLElement>("#outline-pane")!;
+  const restoreOutlineTab = () => {
+    if (!isOutlineEnabled()) {
+      refreshOutline();
+      return;
+    }
+    tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === "outline"));
+    filesPane.hidden = true;
+    outlinePane.hidden = false;
+    refreshOutline();
+  };
+  bus.on("doc:loaded", restoreOutlineTab);
+
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const isOutline = btn.dataset.tab === "outline";
+      tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === btn.dataset.tab));
+      filesPane.hidden = isOutline;
+      outlinePane.hidden = !isOutline;
+      localStorage.setItem(OUTLINE_KEY, isOutline ? "1" : "0");
+      if (isOutline) render();
+      else if (activeEl) { activeEl.classList.remove("active"); activeEl = null; }
+    });
   });
+
+  // 当前已有文档（例如测试/热重载）时立即恢复；正常启动由 doc:loaded 恢复。
+  if (current.get()) restoreOutlineTab();
+
   const ed = deps.getEditorView().scrollDOM;
   const pv = deps.getPreview().element;
   ed.addEventListener("scroll", updateActive, { passive: true });
@@ -204,9 +238,9 @@ export function initOutline(outlineDeps: OutlineDeps) {
 }
 
 /** 打开/编辑/关闭文档后刷新目录树（在模型刷新之后调用）。
- *  面板隐藏时直接跳过（连标题收集都不做）；显示时防抖合并连续变更。 */
+ *  无文档时跳过；显示时防抖合并连续变更。 */
 export function refreshOutline() {
-  if (!syncVisibility()) return;
+  if (current.get() === null) return;
   if (refreshTimer !== undefined) return;
   refreshTimer = window.setTimeout(() => {
     refreshTimer = undefined;

@@ -1,0 +1,28 @@
+{
+  "arch": "before",
+  "meta": {
+    "time": "2026-08-25T09:56:36.849Z",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCode/3.9.1 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+    "viewport": "1440x900",
+    "dpr": 1,
+    "docMedium": "12044 字符 / 599 行",
+    "docLarge": "67094 字符 / 3120 行",
+    "note": "openDoc_*/previewScroll/editorScroll/listUpdate_serial 含 rAF 等待下限（settle(3)≈50ms、双 rAF≈33ms@60fps），跨架构对比看差值；typeSync_*/enterSync/init_cold/listUpdate_burst_sync 为纯同步耗时，无下限。"
+  },
+  "scenarios": {
+    "init_cold": { "n": 1, "unit": "ms", "mean": 12.9, "median": 12.9, "p95": 12.9, "min": 12.9, "max": 12.9 },
+    "openDoc_medium": { "n": 12, "unit": "ms", "mean": 67.017, "median": 66.7, "p95": 68.1, "min": 65.7, "max": 69.9 },
+    "openDoc_large": { "n": 8, "unit": "ms", "mean": 67.113, "median": 66.6, "p95": 67.8, "min": 66, "max": 69.9 },
+    "typeSync_medium": { "n": 48, "unit": "ms", "mean": 3.817, "median": 3.5, "p95": 6.1, "min": 2.1, "max": 8.7 },
+    "typeSync_large": { "n": 48, "unit": "ms", "mean": 11.744, "median": 11.2, "p95": 14.3, "min": 9.5, "max": 16.2 },
+    "typeSync_tail": { "n": 48, "unit": "ms", "mean": 3.59, "median": 3, "p95": 5.7, "min": 2, "max": 13.3 },
+    "enterSync_medium": { "n": 24, "unit": "ms", "mean": 3.608, "median": 3.7, "p95": 4.7, "min": 2.3, "max": 5.1 },
+    "typePaint_medium": { "n": 16, "unit": "ms", "mean": 24.162, "median": 20, "p95": 33.3, "min": 18.5, "max": 34.3 },
+    "viewSwitch_large": { "n": 12, "unit": "ms", "mean": 52.817, "median": 50.1, "p95": 51.3, "min": 49.2, "max": 82.3 },
+    "previewScroll_large": { "n": 20, "unit": "ms", "mean": 33.34, "median": 33.3, "p95": 33.5, "min": 33.1, "max": 33.6 },
+    "editorScroll_large": { "n": 20, "unit": "ms", "mean": 33.325, "median": 33.3, "p95": 34.3, "min": 25.4, "max": 40.9 },
+    "listUpdate_serial": { "n": 20, "unit": "ms", "mean": 33.335, "median": 33.3, "p95": 33.6, "min": 32.9, "max": 33.8 },
+    "listUpdate_burst_sync": { "n": 1, "unit": "ms", "mean": 36.1, "median": 36.1, "p95": 36.1, "min": 36.1, "max": 36.1 },
+    "listUpdate_burst_total": { "n": 1, "unit": "ms", "mean": 83.4, "median": 83.4, "p95": 83.4, "min": 83.4, "max": 83.4 }
+  }
+}

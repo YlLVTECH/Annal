@@ -1,12 +1,31 @@
+// 侧栏模块：笔记列表 / 外部文件列表 / 搜索 / 分页 / 多选 / 行内重命名 / 宽度与折叠。
+// 渲染改为信号驱动：notes/openFiles/current/query/searchResults/listPage/missingPaths
+// 等信号变化时经微任务合并触发一次 renderList（同一 tick 内多次状态更新只渲染一次）；
+// 多选（selectedIds）只走轻量的 updateSelectionUI，不整表重建。
+
 import { invoke } from "@tauri-apps/api/core";
+import {
+  current,
+  listPage,
+  listPageSize,
+  missingPaths,
+  notes,
+  openFiles,
+  query,
+  rangeAnchorId,
+  searchResults,
+  selectedIds,
+  sidebarHidden,
+  sidebarWidth,
+} from "./state";
+import { coalesceByMicrotask } from "./signal";
 import {
   fmtTime,
   pathKey,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  state,
-} from "./state";
+} from "./utils";
 import { t } from "./i18n";
 import type { NoteMeta, Source } from "./types";
 
@@ -18,39 +37,36 @@ const sidebarExpandBtn = document.querySelector<HTMLButtonElement>("#sidebar-exp
 const noteListEl = document.querySelector<HTMLUListElement>("#note-list")!;
 const emptyHintEl = document.querySelector<HTMLDivElement>("#empty-hint")!;
 const searchInputEl = document.querySelector<HTMLInputElement>("#search-input")!;
-const editorTitleEl = document.querySelector<HTMLSpanElement>("#editor-title")!;
 const paginationControls = document.querySelector<HTMLDivElement>("#pagination-controls")!;
 const pagePrevBtn = document.querySelector<HTMLButtonElement>("#page-prev")!;
 const pageNextBtn = document.querySelector<HTMLButtonElement>("#page-next")!;
 const pageInfo = document.querySelector<HTMLSpanElement>("#page-info")!;
 const pageSizeSelect = document.querySelector<HTMLSelectElement>("#page-size")!;
 const batchBar = document.querySelector<HTMLDivElement>("#batch-bar")!;
-const batchCount = document.querySelector<HTMLSpanElement>("#batch-count")!;
+const batchInfoEl = document.querySelector<HTMLSpanElement>("#batch-info")!;
 const batchDeleteBtn = document.querySelector<HTMLButtonElement>("#batch-delete-btn")!;
 const batchImportBtn = document.querySelector<HTMLButtonElement>("#batch-import-btn")!;
 const batchExportBtn = document.querySelector<HTMLButtonElement>("#batch-export-btn")!;
 const batchCancelBtn = document.querySelector<HTMLButtonElement>("#batch-cancel-btn")!;
 
-let onSelectSourceCallback: ((src: Source) => Promise<void>) | null = null;
-let onRenameSuccessCallback: ((id: string, updated: NoteMeta) => void) | null = null;
+let onSelectSourceCallback: ((src: Source) => Promise<unknown>) | null = null;
 let onStatusCallback: ((msg: string) => void) | null = null;
 let onContextMenuCallback: ((e: MouseEvent) => void) | null = null;
+let onRenameSuccessCallback: ((id: string, updated: NoteMeta) => void) | null = null;
 let onBatchDeleteCallback: ((ids: string[]) => Promise<void>) | null = null;
 let onBatchImportCallback: ((ids: string[]) => Promise<void>) | null = null;
 let onBatchExportCallback: ((ids: string[]) => Promise<void>) | null = null;
+let searchGeneration = 0;
 
 /* ---------- 侧栏宽度 / 折叠 ---------- */
 
 export function applySidebarWidth(width: number) {
-  state.sidebarWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
-  sidebarEl.style.width = `${state.sidebarWidth}px`;
+  const clamped = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
+  sidebarWidth.set(clamped);
 }
 
 export function setSidebarHidden(hidden: boolean) {
-  state.sidebarHidden = hidden;
-  document.body.classList.toggle("sidebar-hidden", hidden);
-  if (!hidden) document.body.classList.remove("sidebar-auto-hidden");
-  localStorage.setItem("notebook:sidebar", hidden ? "hidden" : "shown");
+  sidebarHidden.set(hidden);
 }
 
 export function setResponsiveSidebarHidden(hidden: boolean) {
@@ -58,7 +74,7 @@ export function setResponsiveSidebarHidden(hidden: boolean) {
 }
 
 export function initSidebarResizer() {
-  applySidebarWidth(state.sidebarWidth);
+  applySidebarWidth(sidebarWidth.get());
 
   resizerEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -71,7 +87,7 @@ export function initSidebarResizer() {
       resizerEl.removeEventListener("pointermove", onMove);
       resizerEl.removeEventListener("pointerup", onUp);
       resizerEl.removeEventListener("pointercancel", onUp);
-      localStorage.setItem("notebook:sidebar-width", String(state.sidebarWidth));
+      localStorage.setItem("notebook:sidebar-width", String(sidebarWidth.get()));
     };
     resizerEl.addEventListener("pointermove", onMove);
     resizerEl.addEventListener("pointerup", onUp);
@@ -95,12 +111,13 @@ function addGroupHeader(frag: DocumentFragment, i18nKey: string) {
   frag.appendChild(li);
 }
 
-export function updateMissingUI(updateBadgeFn?: (gone: boolean, isFile: boolean) => void) {
+/** 刷新列表项的“已删除”状态与时间列（renderList 重建后统一调用一次） */
+function updateMissingUI() {
   for (const li of noteListEl.querySelectorAll<HTMLLIElement>(".note-item")) {
     const id = li.dataset.noteId;
     const fp = li.dataset.filePath;
-    const p = id ? state.notes.find((n) => n.id === id)?.path : fp;
-    const gone = !!p && state.missingPaths.has(pathKey(p));
+    const p = id ? notes.get().find((n) => n.id === id)?.path : fp;
+    const gone = !!p && missingPaths.get().has(pathKey(p));
     li.classList.toggle("missing", gone);
     const time = li.querySelector<HTMLDivElement>(".note-time");
     if (!time) continue;
@@ -111,23 +128,10 @@ export function updateMissingUI(updateBadgeFn?: (gone: boolean, isFile: boolean)
       time.textContent = fp;
       time.title = fp;
     } else {
-      const n = id ? state.notes.find((n) => n.id === id) : undefined;
+      const n = id ? notes.get().find((n) => n.id === id) : undefined;
       time.textContent = n ? fmtTime(n.updatedAt) : "";
       time.title = "";
     }
-  }
-
-  if (updateBadgeFn) {
-    if (!state.current) {
-      updateBadgeFn(false, false);
-      return;
-    }
-    const currentPath =
-      state.current.kind === "note"
-        ? state.notes.find((n) => n.id === (state.current as { id: string }).id)?.path ?? ""
-        : state.current.path;
-    const gone = state.missingPaths.has(pathKey(currentPath));
-    updateBadgeFn(gone, state.current.kind === "file");
   }
 }
 
@@ -140,19 +144,15 @@ export function getItemKey(li: HTMLLIElement): string {
 }
 
 export function isItemSelected(key: string): boolean {
-  return state.selectedIds.includes(key);
+  return selectedIds.get().includes(key);
 }
 
 export function toggleSelect(key: string) {
-  const idx = state.selectedIds.indexOf(key);
-  if (idx >= 0) {
-    state.selectedIds.splice(idx, 1);
-  } else {
-    state.selectedIds.push(key);
-  }
+  const cur = selectedIds.get();
+  const idx = cur.indexOf(key);
+  selectedIds.set(idx >= 0 ? cur.filter((k) => k !== key) : [...cur, key]);
   // Ctrl/⌘ 点击同时更新范围锚点，便于随后 Shift+点击做范围选择
-  state.rangeAnchorId = key;
-  updateSelectionUI();
+  rangeAnchorId.set(key);
 }
 
 export function selectRange(currentKey: string) {
@@ -161,37 +161,35 @@ export function selectRange(currentKey: string) {
     const k = getItemKey(li);
     if (k) visibleKeys.push(k);
   }
-  if (!state.rangeAnchorId || !visibleKeys.includes(state.rangeAnchorId)) {
-    state.rangeAnchorId = currentKey;
-    state.selectedIds = [currentKey];
-    updateSelectionUI();
+  const anchor = rangeAnchorId.get();
+  if (!anchor || !visibleKeys.includes(anchor)) {
+    rangeAnchorId.set(currentKey);
+    selectedIds.set([currentKey]);
     return;
   }
-  const start = visibleKeys.indexOf(state.rangeAnchorId);
+  const start = visibleKeys.indexOf(anchor);
   const end = visibleKeys.indexOf(currentKey);
   if (start < 0 || end < 0) {
-    state.rangeAnchorId = currentKey;
-    state.selectedIds = [currentKey];
-    updateSelectionUI();
+    rangeAnchorId.set(currentKey);
+    selectedIds.set([currentKey]);
     return;
   }
   const [lo, hi] = start < end ? [start, end] : [end, start];
-  const range = visibleKeys.slice(lo, hi + 1);
-  state.selectedIds = range;
-  updateSelectionUI();
+  selectedIds.set(visibleKeys.slice(lo, hi + 1));
 }
 
 export function clearSelection() {
-  state.selectedIds = [];
-  state.rangeAnchorId = null;
-  updateSelectionUI();
+  selectedIds.set([]);
+  rangeAnchorId.set(null);
 }
 
+/** 轻量选择态更新：只切 class 与批量操作条，不重建列表 */
 export function updateSelectionUI() {
-  const count = state.selectedIds.length;
-  batchCount.textContent = String(count);
+  const ids = selectedIds.get();
+  const count = ids.length;
+  batchInfoEl.textContent = t("sidebar.batch.info", { count: String(count) });
   batchBar.hidden = count === 0;
-  const hasNote = state.selectedIds.some((id) => state.notes.some((n) => n.id === id));
+  const hasNote = ids.some((id) => notes.get().some((n) => n.id === id));
   batchImportBtn.disabled = hasNote;
   for (const li of noteListEl.querySelectorAll<HTMLLIElement>(".note-item")) {
     const key = getItemKey(li);
@@ -202,19 +200,24 @@ export function updateSelectionUI() {
 /** 清理已不存在条目（被删笔记 / 已关闭文件）的选中项，并复位失效的锚点 */
 function pruneSelection() {
   const valid = new Set<string>();
-  for (const n of state.notes) valid.add(n.id);
-  for (const f of state.openFiles) valid.add(f.path);
-  state.selectedIds = state.selectedIds.filter((k) => valid.has(k));
-  if (state.rangeAnchorId && !valid.has(state.rangeAnchorId)) state.rangeAnchorId = null;
+  for (const n of notes.get()) valid.add(n.id);
+  for (const f of openFiles.get()) valid.add(f.path);
+  const next = selectedIds.get().filter((k) => valid.has(k));
+  const nextAnchor = rangeAnchorId.get();
+  const anchorValid = nextAnchor !== null && valid.has(nextAnchor);
+  if (next.length !== selectedIds.get().length || (nextAnchor !== null && !anchorValid)) {
+    selectedIds.set(next);
+    rangeAnchorId.set(anchorValid ? nextAnchor : null);
+  }
 }
 
 export function renderPaginationControls(totalNotes: number) {
-  const pageSize = state.listPageSize;
+  const pageSize = listPageSize.get();
   const totalPages = Math.max(1, Math.ceil(totalNotes / pageSize));
-  let currentPage = state.listPage;
+  let currentPage = listPage.get();
   if (currentPage > totalPages) currentPage = totalPages;
   if (currentPage < 1) currentPage = 1;
-  state.listPage = currentPage;
+  if (currentPage !== listPage.get()) listPage.set(currentPage);
 
   paginationControls.hidden = totalPages <= 1;
   pageInfo.textContent = t("sidebar.page.info", { current: String(currentPage), total: String(totalPages) });
@@ -226,38 +229,25 @@ export function renderPaginationControls(totalNotes: number) {
   }
 }
 
-export function updateListAfterSave(meta: NoteMeta) {
-  const li = noteListEl.querySelector<HTMLLIElement>(
-    `li[data-note-id="${CSS.escape(meta.id)}"]`,
-  );
-  if (!li) {
-    renderList();
-    return;
-  }
-  const titleEl = li.querySelector<HTMLDivElement>(".note-title");
-  if (titleEl) titleEl.textContent = meta.title;
-  for (const el of noteListEl.children) {
-    if (el.classList.contains("list-group-header") && el.textContent === t("sidebar.group.notes")) {
-      if (li.previousElementSibling !== el) noteListEl.insertBefore(li, el.nextSibling);
-      break;
-    }
-  }
-  updateMissingUI();
-}
-
 export function renderList() {
   const scrollTop = noteListEl.scrollTop;
   noteListEl.innerHTML = "";
   const frag = document.createDocumentFragment();
+  const activeSource = current.get();
 
-  const displayNotes = state.searchResults ?? state.notes;
-  const isSearching = state.query.length > 0 && state.searchResults === null;
-  const filtered = state.query
-    ? displayNotes.filter((n) => n.title.toLowerCase().includes(state.query))
-    : displayNotes;
-  const filesShown = state.query
-    ? state.openFiles.filter((f) => f.name.toLowerCase().includes(state.query))
-    : state.openFiles;
+  const curQuery = query.get();
+  const backendResults = searchResults.get();
+  const displayNotes = backendResults ?? notes.get();
+  const isSearching = curQuery.length > 0 && backendResults === null;
+  // 后端结果包含标题与正文匹配；只有等待后端时才用标题做即时本地过滤。
+  const filtered = backendResults !== null
+    ? backendResults
+    : curQuery
+      ? displayNotes.filter((n) => n.title.toLowerCase().includes(curQuery))
+      : displayNotes;
+  const filesShown = curQuery
+    ? openFiles.get().filter((f) => f.name.toLowerCase().includes(curQuery))
+    : openFiles.get();
 
   emptyHintEl.hidden = filtered.length > 0 || filesShown.length > 0;
   const [hintMain, hintSub] = emptyHintEl.querySelectorAll("p");
@@ -265,11 +255,11 @@ export function renderList() {
     hintMain.textContent = t("sidebar.searching");
     hintSub.textContent = "";
   } else {
-    hintMain.textContent = state.notes.length > 0 ? t("sidebar.noMatch") : t("sidebar.empty.title");
+    hintMain.textContent = notes.get().length > 0 ? t("sidebar.noMatch") : t("sidebar.empty.title");
     hintSub.textContent =
-      state.notes.length > 0
+      notes.get().length > 0
         ? ""
-        : state.openFiles.length > 0
+        : openFiles.get().length > 0
           ? t("sidebar.empty.sub")
           : t("sidebar.empty.subWithOpen");
   }
@@ -280,7 +270,7 @@ export function renderList() {
       const li = document.createElement("li");
       li.className =
         "note-item" +
-        (state.current?.kind === "file" && state.current.path === f.path ? " active" : "");
+        (activeSource?.kind === "file" && activeSource.path === f.path ? " active" : "");
       li.dataset.filePath = f.path;
 
       const title = document.createElement("div");
@@ -299,14 +289,13 @@ export function renderList() {
   }
 
   if (filtered.length > 0) {
-    addGroupHeader(frag, "sidebar.group.notes");
-    const start = (state.listPage - 1) * state.listPageSize;
-    const pageNotes = filtered.slice(start, start + state.listPageSize);
+    const start = (listPage.get() - 1) * listPageSize.get();
+    const pageNotes = filtered.slice(start, start + listPageSize.get());
     for (const n of pageNotes) {
       const li = document.createElement("li");
       li.className =
         "note-item" +
-        (state.current?.kind === "note" && n.id === state.current.id ? " active" : "");
+        (activeSource?.kind === "note" && n.id === activeSource.id ? " active" : "");
       li.dataset.noteId = n.id;
 
       const title = document.createElement("div");
@@ -337,12 +326,15 @@ export function renderList() {
   renderPaginationControls(filtered.length);
 }
 
+/** 同一微任务批次内的多次状态变更合并为一次列表重建 */
+const scheduleListRender = coalesceByMicrotask(renderList);
+
 export function startRename(id: string) {
   const li = noteListEl.querySelector<HTMLLIElement>(
     `li[data-note-id="${CSS.escape(id)}"]`,
   );
   const titleEl = li?.querySelector<HTMLDivElement>(".note-title");
-  const meta = state.notes.find((n) => n.id === id);
+  const meta = notes.get().find((n) => n.id === id);
   if (!li || !titleEl || !meta) return;
 
   li.classList.add("renaming");
@@ -366,13 +358,16 @@ export function startRename(id: string) {
       try {
         const updated = await invoke<NoteMeta>("rename_note", { id, title: value });
         const oldPath = meta.path;
-        const i = state.notes.findIndex((n) => n.id === id);
-        if (i >= 0) state.notes[i] = updated;
-        if (oldPath) state.missingPaths.delete(pathKey(oldPath));
-        renderList();
-        if (state.current?.kind === "note" && state.current.id === id) {
-          editorTitleEl.textContent = updated.title;
-          editorTitleEl.title = updated.path;
+        const next = notes.get();
+        const i = next.findIndex((n) => n.id === id);
+        if (i >= 0) {
+          const list = [...next];
+          list[i] = updated;
+          notes.set(list);
+        }
+        if (oldPath) {
+          const gone = new Set(missingPaths.get());
+          if (gone.delete(pathKey(oldPath))) missingPaths.set(gone);
         }
         if (onRenameSuccessCallback) onRenameSuccessCallback(id, updated);
       } catch (err) {
@@ -400,49 +395,70 @@ export function startRename(id: string) {
   input.select();
 }
 
-export function initSidebar(
-  onSelect: (src: Source) => Promise<void>,
-  onStatus: (msg: string) => void,
-  onContextMenu: (e: MouseEvent) => void,
-  onRenameSuccess?: (id: string, updated: NoteMeta) => void,
-  onBatchDelete?: (ids: string[]) => Promise<void>,
-  onBatchImport?: (ids: string[]) => Promise<void>,
-  onBatchExport?: (ids: string[]) => Promise<void>,
-) {
-  onSelectSourceCallback = onSelect;
-  onStatusCallback = onStatus;
-  onContextMenuCallback = onContextMenu;
-  if (onRenameSuccess) onRenameSuccessCallback = onRenameSuccess;
-  if (onBatchDelete) onBatchDeleteCallback = onBatchDelete;
-  if (onBatchImport) onBatchImportCallback = onBatchImport;
-  if (onBatchExport) onBatchExportCallback = onBatchExport;
+export interface SidebarActions {
+  onSelect: (src: Source) => Promise<unknown>;
+  onStatus: (msg: string) => void;
+  onContextMenu: (e: MouseEvent) => void;
+  onRenameSuccess?: (id: string, updated: NoteMeta) => void;
+  onBatchDelete?: (ids: string[]) => Promise<void>;
+  onBatchImport?: (ids: string[]) => Promise<void>;
+  onBatchExport?: (ids: string[]) => Promise<void>;
+}
+
+export function initSidebar(actions: SidebarActions) {
+  onSelectSourceCallback = actions.onSelect;
+  onStatusCallback = actions.onStatus;
+  onContextMenuCallback = actions.onContextMenu;
+  if (actions.onRenameSuccess) onRenameSuccessCallback = actions.onRenameSuccess;
+  if (actions.onBatchDelete) onBatchDeleteCallback = actions.onBatchDelete;
+  if (actions.onBatchImport) onBatchImportCallback = actions.onBatchImport;
+  if (actions.onBatchExport) onBatchExportCallback = actions.onBatchExport;
 
   initSidebarResizer();
-  setSidebarHidden(state.sidebarHidden);
+  sidebarEl.style.width = `${sidebarWidth.get()}px`;
+  document.body.classList.toggle("sidebar-hidden", sidebarHidden.get());
+  if (!sidebarHidden.get()) document.body.classList.remove("sidebar-auto-hidden");
 
-  sidebarCollapseBtn.addEventListener("click", () => setSidebarHidden(!state.sidebarHidden));
+  // 状态信号 -> 列表渲染（微任务合并）；多选走轻量路径
+  notes.subscribe(scheduleListRender);
+  openFiles.subscribe(scheduleListRender);
+  current.subscribe(scheduleListRender);
+  query.subscribe(scheduleListRender);
+  searchResults.subscribe(scheduleListRender);
+  listPage.subscribe(scheduleListRender);
+  listPageSize.subscribe(scheduleListRender);
+  missingPaths.subscribe(scheduleListRender);
+  selectedIds.subscribe(updateSelectionUI);
+
+  // 宽度/折叠信号 -> DOM 与持久化
+  sidebarWidth.subscribe((w) => {
+    sidebarEl.style.width = `${w}px`;
+  });
+  sidebarHidden.subscribe((hidden) => {
+    document.body.classList.toggle("sidebar-hidden", hidden);
+    if (!hidden) document.body.classList.remove("sidebar-auto-hidden");
+    localStorage.setItem("notebook:sidebar", hidden ? "hidden" : "shown");
+  });
+
+  sidebarCollapseBtn.addEventListener("click", () => setSidebarHidden(!sidebarHidden.get()));
   sidebarExpandBtn.addEventListener("click", () => setSidebarHidden(false));
 
   searchInputEl.addEventListener("input", () => {
-    state.query = searchInputEl.value.trim().toLowerCase();
-    state.listPage = 1;
-    state.searchResults = null;
-    renderList();
+    query.set(searchInputEl.value.trim().toLowerCase());
+    listPage.set(1);
+    searchResults.set(null);
     // 防抖 300ms 调用后端全文搜索
     window.clearTimeout((searchInputEl as HTMLInputElement & { _timer?: number })._timer);
+    const requestQuery = query.get();
+    const generation = ++searchGeneration;
     (searchInputEl as HTMLInputElement & { _timer?: number })._timer = window.setTimeout(async () => {
-      if (!state.query) {
-        state.searchResults = null;
-        renderList();
-        return;
-      }
+      if (!requestQuery || requestQuery !== query.get()) return;
       try {
-        const results = await invoke<NoteMeta[]>("search_notes", { query: state.query });
-        state.searchResults = results;
+        const results = await invoke<NoteMeta[]>("search_notes", { query: requestQuery });
+        if (generation === searchGeneration && requestQuery === query.get()) searchResults.set(results);
       } catch {
-        state.searchResults = [];
+        if (generation === searchGeneration && requestQuery === query.get()) searchResults.set([]);
       }
-      renderList();
     }, 300);
   });
 
@@ -463,7 +479,7 @@ export function initSidebar(
     if (!key) return;
     if (e.ctrlKey || e.metaKey) {
       toggleSelect(key);
-    } else if (e.shiftKey && state.rangeAnchorId) {
+    } else if (e.shiftKey && rangeAnchorId.get()) {
       selectRange(key);
     } else {
       clearSelection();
@@ -476,46 +492,43 @@ export function initSidebar(
   });
 
   pagePrevBtn.addEventListener("click", () => {
-    if (state.listPage > 1) {
-      state.listPage--;
-      renderList();
-    }
+    if (listPage.get() > 1) listPage.set(listPage.get() - 1);
   });
 
   pageNextBtn.addEventListener("click", () => {
-    const filtered = state.query
-      ? state.notes.filter((n) => n.title.toLowerCase().includes(state.query))
-      : state.notes;
-    const totalPages = Math.max(1, Math.ceil(filtered.length / state.listPageSize));
-    if (state.listPage < totalPages) {
-      state.listPage++;
-      renderList();
-    }
+    const curQuery = query.get();
+    const backendResults = searchResults.get();
+    const filtered = backendResults !== null
+      ? backendResults
+      : curQuery
+        ? notes.get().filter((n) => n.title.toLowerCase().includes(curQuery))
+        : notes.get();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / listPageSize.get()));
+    if (listPage.get() < totalPages) listPage.set(listPage.get() + 1);
   });
 
   pageSizeSelect.addEventListener("change", () => {
     const next = Number(pageSizeSelect.value);
     if (!Number.isFinite(next) || next <= 0) return;
-    state.listPageSize = next;
     localStorage.setItem("notebook:list-page-size", String(next));
-    state.listPage = 1;
-    renderList();
+    listPageSize.set(next);
+    listPage.set(1);
   });
 
   batchDeleteBtn.addEventListener("click", async () => {
-    const ids = [...state.selectedIds];
+    const ids = [...selectedIds.get()];
     if (ids.length === 0) return;
     if (onBatchDeleteCallback) await onBatchDeleteCallback(ids);
   });
 
   batchImportBtn.addEventListener("click", async () => {
-    const ids = [...state.selectedIds];
+    const ids = [...selectedIds.get()];
     if (ids.length === 0) return;
     if (onBatchImportCallback) await onBatchImportCallback(ids);
   });
 
   batchExportBtn.addEventListener("click", async () => {
-    const ids = [...state.selectedIds];
+    const ids = [...selectedIds.get()];
     if (ids.length === 0) return;
     if (onBatchExportCallback) await onBatchExportCallback(ids);
   });
@@ -523,4 +536,6 @@ export function initSidebar(
   batchCancelBtn.addEventListener("click", () => {
     clearSelection();
   });
+
+  renderList();
 }

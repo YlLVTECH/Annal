@@ -66,7 +66,9 @@ export type Align = "left" | "center" | "right";
 
 /** 右键菜单项配置 */
 export interface CtxItem {
-  label: string;
+  label?: string;
   danger?: boolean;
-  action: () => void;
+  action?: () => void;
+  separator?: boolean;
+  shortcut?: string;
 }

@@ -1,16 +1,18 @@
-import { handleDialogEscape } from "./dialogs";
+import { handleDialogEscape, isAnyDialogOpen } from "./dialogs";
 import { canEditCurrent, isComposing, runCommand, setViewMode } from "./editor";
 import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "./history";
 import { setSidebarHidden } from "./sidebar";
-import { state } from "./state";
+import { sidebarHidden } from "./state";
 import { closeTablePopover, isTablePopoverOpen } from "./table";
 
 export interface ShortcutHandlers {
   onNewNote: () => void;
   onOpenFile: () => void;
-  onFlushSave: () => Promise<void>;
+  onFlushSave: () => Promise<boolean>;
   /** CodeMirror 编辑器是否获得焦点（决定 Ctrl+B/I/K 是否作用于编辑器） */
   editorHasFocus: () => boolean;
+  /** 打开编辑器查找面板（Ctrl+F 统一入口） */
+  onOpenFind: () => void;
 }
 
 export function initShortcuts(handlers: ShortcutHandlers) {
@@ -33,9 +35,18 @@ export function initShortcuts(handlers: ShortcutHandlers) {
       void handlers.onFlushSave();
       return;
     }
+    if (mod && k === "f") {
+      // 统一接管 Ctrl+F：无论焦点在哪都屏蔽 WebView 原生查找，
+      // 可用时改为聚焦编辑器并打开 VSCode 风格查找面板。
+      e.preventDefault();
+      if (!isComposing() && !isAnyDialogOpen() && !isHistoryOpen() && canEditCurrent()) {
+        handlers.onOpenFind();
+      }
+      return;
+    }
     if (mod && e.key === "\\") {
       e.preventDefault();
-      setSidebarHidden(!state.sidebarHidden);
+      setSidebarHidden(!sidebarHidden.get());
       return;
     }
 

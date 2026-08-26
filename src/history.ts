@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openConfirm } from "./dialogs";
 import { renderMarkdownWhole } from "./markdownModel";
-import { dirOfPath, fmtRelative, fmtSize, fmtTime, state } from "./state";
+import { dirOfPath, fmtRelative, fmtSize, fmtTime } from "./utils";
+import { current, notes } from "./state";
 import { t } from "./i18n";
 import type { NoteMeta, NoteVersion } from "./types";
 
@@ -100,7 +101,7 @@ export async function selectHistoryVersion(seq: number) {
     if (historyCompareOn) {
       await renderVersionDiff(id, seq, content);
     } else {
-      const baseDir = dirOfPath(state.notes.find((n) => n.id === id)?.path ?? "");
+      const baseDir = dirOfPath(notes.get().find((n) => n.id === id)?.path ?? "");
       historyViewContentEl.innerHTML = content.trim()
         ? renderMarkdownWhole(content, baseDir)
         : `<div class="history-empty">${t("history.empty")}</div>`;
@@ -193,18 +194,12 @@ function renderHistoryList() {
   historySubEl.textContent = t("history.versionsCount", { count: historyVersions.length });
 }
 
-export async function openHistory(id: string, flushSaveFn?: () => Promise<void>) {
-  if (flushSaveFn) {
-    try {
-      await flushSaveFn();
-    } catch {
-      // 保存失败不阻断
-    }
-  }
+export async function openHistory(id: string, flushSaveFn?: () => Promise<boolean>) {
+  if (flushSaveFn && !(await flushSaveFn())) return;
   historyNoteId = id;
   historyVersions = [];
   historySelectedSeq = 0;
-  const meta = state.notes.find((n) => n.id === id);
+  const meta = notes.get().find((n) => n.id === id);
   historyTitleEl.textContent = meta?.title ?? t("history.title.default");
   historyTitleEl.title = meta?.path ?? "";
   historySubEl.textContent = "";
@@ -265,7 +260,7 @@ export async function restoreSelectedVersion() {
   const id = historyNoteId;
   const seq = historySelectedSeq;
   if (!id || !seq) return;
-  const meta = state.notes.find((n) => n.id === id);
+  const meta = notes.get().find((n) => n.id === id);
   const version = historyVersions.find((v) => v.seq === seq);
   const nameNote = version?.title
     ? t("history.restoreNameNote", { title: version.title })
@@ -279,7 +274,8 @@ export async function restoreSelectedVersion() {
       try {
         const restored = await invoke<NoteMeta>("restore_note_version", { id, seq });
         closeHistory();
-        const isCurrent = state.current?.kind === "note" && state.current.id === id;
+        const cur = current.get();
+        const isCurrent = cur?.kind === "note" && cur.id === id;
         if (onRestoredCallback) {
           onRestoredCallback(restored, isCurrent);
         }

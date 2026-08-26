@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { state } from "./state";
+import { current, notes } from "./state";
 import { parseViewMode } from "./types";
 import { getAvailableLocales, t } from "./i18n";
 import type { CtxItem, NoteVersion } from "./types";
@@ -26,6 +26,7 @@ const settingThemeEl = document.querySelector<HTMLSelectElement>("#setting-theme
 const settingViewEl = document.querySelector<HTMLSelectElement>("#setting-view")!;
 const settingContentDensityEl = document.querySelector<HTMLSelectElement>("#setting-content-density")!;
 const settingFontSizeEl = document.querySelector<HTMLSelectElement>("#setting-font-size")!;
+const settingFontFamilyEl = document.querySelector<HTMLSelectElement>("#setting-font-family")!;
 const settingAutosaveEl = document.querySelector<HTMLInputElement>("#setting-autosave")!;
 const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setting-autosave-delay")!;
 const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
@@ -75,23 +76,18 @@ let onCommitSuccess: ((msg: string) => void) | null = null;
 
 export async function requestCommit(
   id?: string,
-  flushSaveFn?: () => Promise<void>,
+  flushSaveFn?: () => Promise<boolean>,
   statusCallback?: (msg: string) => void,
 ) {
-  const noteId = id ?? (state.current?.kind === "note" ? state.current.id : null);
+  const cur = current.get();
+  const noteId = id ?? (cur?.kind === "note" ? cur.id : null);
   if (!noteId) return;
-  if (flushSaveFn) {
-    try {
-      await flushSaveFn();
-    } catch {
-      // 保持异常不阻断
-    }
-  }
+  if (flushSaveFn && !(await flushSaveFn())) return;
   if (statusCallback) {
     onCommitSuccess = statusCallback;
   }
   commitNoteId = noteId;
-  const meta = state.notes.find((n) => n.id === noteId);
+  const meta = notes.get().find((n) => n.id === noteId);
   commitTextEl.textContent = t("commit.confirmText", { title: meta?.title ?? t("history.title.default") });
   commitInputEl.value = "";
   commitOverlayEl.hidden = false;
@@ -131,13 +127,28 @@ export function hideContextMenu() {
 export function showContextMenu(x: number, y: number, items: CtxItem[]) {
   contextMenuEl.innerHTML = "";
   for (const item of items) {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "ctx-separator";
+      contextMenuEl.appendChild(sep);
+      continue;
+    }
     const btn = document.createElement("button");
     btn.className = "ctx-item" + (item.danger ? " danger" : "");
-    btn.textContent = item.label;
-    btn.addEventListener("click", () => {
-      hideContextMenu();
-      item.action();
-    });
+    if (item.label) btn.textContent = item.label;
+    if (item.shortcut) {
+      const kbd = document.createElement("kbd");
+      kbd.className = "ctx-shortcut";
+      kbd.textContent = item.shortcut;
+      btn.appendChild(kbd);
+    }
+    const action = item.action;
+    if (action) {
+      btn.addEventListener("click", () => {
+        hideContextMenu();
+        action();
+      });
+    }
     contextMenuEl.appendChild(btn);
   }
   contextMenuEl.hidden = false;
@@ -238,6 +249,7 @@ export function getSettingsElements() {
     view: settingViewEl,
     contentDensity: settingContentDensityEl,
     fontSize: settingFontSizeEl,
+    fontFamily: settingFontFamilyEl,
     autosave: settingAutosaveEl,
     autosaveDelay: settingAutosaveDelayEl,
     sidebarWidth: settingSidebarWidthEl,
@@ -273,6 +285,7 @@ export function syncSettingsUI() {
   const savedDensity = localStorage.getItem("notebook:content-density");
   els.contentDensity.value = savedDensity === "sparse" || savedDensity === "compact" ? savedDensity : "standard";
   els.fontSize.value = localStorage.getItem("notebook:font-size") || "15.5";
+  els.fontFamily.value = localStorage.getItem("notebook:font-family") || "serif";
   els.autosave.checked = localStorage.getItem("notebook:autosave") !== "0";
   els.autosaveDelay.value = localStorage.getItem("notebook:autosave-delay") || "500";
   els.sidebarWidth.value = localStorage.getItem("notebook:sidebar-width") || "260";

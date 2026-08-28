@@ -28,6 +28,10 @@ dist-ssr
 src-tauri/target
 target
 
+# 临时脚本产物（esbuild 生成的 bundle，仅运行时生成）
+scripts/.model-bundle.mjs
+*.bak
+
 # ZCode workspace
 .zcode/
 rustup-init.exe

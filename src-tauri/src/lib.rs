@@ -1674,6 +1674,68 @@ fn close_ready(window: tauri::Window) {
     let _ = window.destroy();
 }
 
+/// macOS 原生菜单栏（应用 / 编辑 / 窗口），是"红绿灯 + 隐藏标题"之外的第二块系统原生元素。
+/// 标签用中文硬编码：与 AGENTS.md 的中文 UI 约定一致；如后续支持运行时切换语言，
+/// 需要前端通知后端重建菜单（Tauri 菜单不支持声明式本地化）。
+///
+/// 刻意不放"退出"项：Tauri 尚未接入 NSApplicationDelegate 的 applicationShouldTerminate
+/// （tauri-apps/tauri#12978），Cmd+Q / Dock 退出不会触发 ExitRequested，直接 terminate
+/// 会绕过前端的 app-close-request 保存握手导致丢字。不放该项时 Cmd+Q 不被菜单拦截，
+/// 用户经由红绿灯关闭窗口，仍走既有握手（CloseRequested → flushSave → close_ready）。
+/// 同理，编辑菜单不放 撤销/重做：菜单键位会抢先消费 Cmd+Z 并路由给 NSUndoManager，
+/// 而 CodeMirror 6 用自己的历史栈，不与原生撤销管理器集成；不放才能让按键直达页面。
+/// 剪切/拷贝/粘贴/全选走 WKWebView 原生 selector（粘贴仍会派发 DOM paste 事件，
+/// editor.ts 的图片粘贴处理不受影响），保证 Cmd+C/V 在任何焦点下行为正确。
+#[cfg(target_os = "macos")]
+fn build_mac_menu(
+    app: &tauri::AppHandle,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
+
+    let about = PredefinedMenuItem::about(app, Some("关于 Notebook"), None)?;
+    let services = PredefinedMenuItem::services(app, Some("服务"))?;
+    let hide = PredefinedMenuItem::hide(app, Some("隐藏 Notebook"))?;
+    let hide_others = PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?;
+    let show_all = PredefinedMenuItem::show_all(app, Some("全部显示"))?;
+    let app_menu = SubmenuBuilder::new(app, "Notebook")
+        .item(&about)
+        .separator()
+        .item(&services)
+        .separator()
+        .item(&hide)
+        .item(&hide_others)
+        .item(&show_all)
+        .build()?;
+
+    let cut = PredefinedMenuItem::cut(app, Some("剪切"))?;
+    let copy = PredefinedMenuItem::copy(app, Some("拷贝"))?;
+    let paste = PredefinedMenuItem::paste(app, Some("粘贴"))?;
+    let select_all = PredefinedMenuItem::select_all(app, Some("全选"))?;
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&cut)
+        .item(&copy)
+        .item(&paste)
+        .separator()
+        .item(&select_all)
+        .build()?;
+
+    let minimize = PredefinedMenuItem::minimize(app, Some("最小化"))?;
+    let zoom = PredefinedMenuItem::maximize(app, Some("缩放"))?;
+    let close = PredefinedMenuItem::close_window(app, Some("关闭窗口"))?;
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .item(&minimize)
+        .item(&zoom)
+        .separator()
+        .item(&close)
+        .build()?;
+
+    MenuBuilder::new(app)
+        .item(&app_menu)
+        .item(&edit_menu)
+        .item(&window_menu)
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pending = filter_md_args(std::env::args());
@@ -1721,6 +1783,17 @@ pub fn run() {
                     });
                 }
                 Err(e) => eprintln!("文件监听初始化失败: {e}"),
+            }
+            // macOS 原生菜单栏：默认菜单为英文且带"退出"项（Cmd+Q 直接 terminate 绕过保存握手），
+            // 用自建菜单替换（无退出项），失败不阻断启动（窗口仍可用）。
+            #[cfg(target_os = "macos")]
+            match build_mac_menu(app.handle()) {
+                Ok(menu) => {
+                    if let Err(e) = app.set_menu(menu) {
+                        eprintln!("macOS 菜单设置失败: {e}");
+                    }
+                }
+                Err(e) => eprintln!("macOS 菜单构建失败: {e}"),
             }
             Ok(())
         })

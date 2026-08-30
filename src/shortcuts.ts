@@ -4,6 +4,7 @@ import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "
 import { setSidebarHidden } from "./sidebar";
 import { sidebarHidden } from "./state";
 import { closeTablePopover, isTablePopoverOpen } from "./table";
+import { IS_MAC } from "./utils";
 
 /* ---------- 可自定义快捷键：命令注册表 ---------- */
 
@@ -60,19 +61,24 @@ const b = (key: string, ctrl = false, shift = false, alt = false, meta = false):
   meta,
 });
 
-/** 出厂默认绑定（与历史硬编码行为一致） */
+/** 出厂默认绑定（与历史硬编码行为一致）。主修饰键 Windows/Linux 用 Ctrl、
+ *  mac 用 Cmd（贴合系统习惯）；仅作用于出厂默认，用户自定义绑定按实际按键存储。 */
+const p = (key: string, shift = false): Binding[] => [
+  IS_MAC ? b(key, false, shift, false, true) : b(key, true, shift),
+];
+
 export const DEFAULT_BINDINGS: Readonly<Record<CommandId, readonly Binding[]>> = {
-  newNote: [b("n", true)],
-  openFile: [b("o", true)],
-  save: [b("s", true)],
-  find: [b("f", true)],
-  toggleSidebar: [b("\\", true)],
-  viewEdit: [b("e", true)],
-  viewSplit: [b("e", true, true)],
-  viewPreview: [b("p", true, true)],
-  bold: [b("b", true)],
-  italic: [b("i", true)],
-  link: [b("k", true)],
+  newNote: p("n"),
+  openFile: p("o"),
+  save: p("s"),
+  find: p("f"),
+  toggleSidebar: p("\\"),
+  viewEdit: p("e"),
+  viewSplit: p("e", true),
+  viewPreview: p("p", true),
+  bold: p("b"),
+  italic: p("i"),
+  link: p("k"),
 };
 
 /* ---------- 绑定的规范化 / 校验 / 匹配 ---------- */
@@ -125,7 +131,6 @@ function sameBinding(a: Binding, x: Binding): boolean {
 
 /* ---------- 运行时绑定表（localStorage 持久化） ---------- */
 
-const isMac = /mac|iphone|ipad/i.test(navigator.platform);
 const bindings = new Map<CommandId, Binding[]>(cloneDefaults());
 
 function cloneDefaults(): [CommandId, Binding[]][] {
@@ -216,7 +221,7 @@ export function formatBindingParts(x: Binding): string[] {
   if (x.ctrl) parts.push("Ctrl");
   if (x.alt) parts.push("Alt");
   if (x.shift) parts.push("Shift");
-  if (x.meta) parts.push(isMac ? "Cmd" : "Win");
+  if (x.meta) parts.push(IS_MAC ? "Cmd" : "Win");
   parts.push(formatKey(x.key));
   return parts;
 }

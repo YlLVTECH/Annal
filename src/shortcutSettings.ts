@@ -318,6 +318,8 @@ function confirmResetAll() {
 const HINT_TARGETS: Array<{ selector: string; command: CommandId; labelKey: string }> = [
   { selector: "#open-file-btn", command: "openFile", labelKey: "titlebar.openFile" },
   { selector: "#new-note-btn", command: "newNote", labelKey: "titlebar.newNote" },
+  { selector: "#sidebar-collapse", command: "toggleSidebar", labelKey: "titlebar.collapseSidebar" },
+  { selector: "#sidebar-expand", command: "toggleSidebar", labelKey: "titlebar.expandSidebar" },
   { selector: '.tool-btn[data-cmd="bold"]', command: "bold", labelKey: "toolbar.bold" },
   { selector: '.tool-btn[data-cmd="italic"]', command: "italic", labelKey: "toolbar.italic" },
   { selector: '.tool-btn[data-cmd="link"]', command: "link", labelKey: "toolbar.link" },

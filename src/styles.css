@@ -345,6 +345,17 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   display: block;
 }
 
+/* ---------- macOS 原生窗口适配 ---------- */
+/* 窗口控制由系统红绿灯承担（tauri.macos.conf.json：titleBarStyle Overlay +
+   trafficLightPosition 12,12），自绘按钮隐藏，标题栏左侧为其留出约 78px。 */
+:root[data-platform="mac"] .titlebar-controls {
+  display: none;
+}
+
+:root[data-platform="mac"] .titlebar-left {
+  padding-left: 80px;
+}
+
 /* ============ 侧边栏 ============ */
 #sidebar {
   width: 260px;

@@ -2,6 +2,13 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // 平台标记，先于样式渲染执行：mac 上隐藏自绘窗口按钮（改用系统红绿灯）、
+      // 标题栏为红绿灯留白，快捷键默认主修饰键走 Cmd（见 utils.ts IS_MAC）。
+      document.documentElement.dataset.platform = /mac|iphone|ipad/i.test(navigator.platform)
+        ? "mac"
+        : "other";
+    </script>
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/src-tauri/icons/icon-transparent.ico" />

@@ -17,6 +17,12 @@ export const SPLIT_RATIO_MAX = 0.8;
 
 export const LIST_PAGE_SIZE = 10;
 
+/** 是否运行在 macOS。依据 index.html 头部内联脚本写入的 data-platform（先于样式渲染，
+ *  CSS 据此隐藏自绘窗口按钮、为红绿灯留白），缺失时兜底用 navigator.platform 探测。 */
+export const IS_MAC =
+  document.documentElement.dataset.platform === "mac" ||
+  /mac|iphone|ipad/i.test(navigator.platform);
+
 export function readContentDensity(): ContentDensity {
   const saved = localStorage.getItem("notebook:content-density");
   return saved === "sparse" || saved === "compact" ? saved : "standard";

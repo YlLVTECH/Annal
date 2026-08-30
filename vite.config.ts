@@ -1,10 +1,26 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+/** dev/build 启动时把 src/i18n（唯一主本）同步到 public/i18n，防止两份手工镜像漂移 */
+function syncI18nAssets(): Plugin {
+  return {
+    name: "sync-i18n-assets",
+    buildStart() {
+      mkdirSync("public/i18n", { recursive: true });
+      for (const name of readdirSync("src/i18n")) {
+        if (name.endsWith(".json")) copyFileSync(join("src/i18n", name), join("public/i18n", name));
+      }
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  plugins: [syncI18nAssets()],
   clearScreen: false,
   server: {
     port: 1420,

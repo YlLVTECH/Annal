@@ -1001,10 +1001,9 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 /* ---------- 工具栏 ---------- */
-/* 宽度足够时单行排布（视图切换在右侧）；窗口变窄时自动换行，按钮始终完整可见 */
+/* 恒定单行：排版按钮区放不下时内部横向滚动（右缘淡出提示），视图切换固定在右侧 */
 #toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px 2px;
   min-height: 42px;
@@ -1012,6 +1011,28 @@ body.sidebar-auto-hidden #editor-header {
   border-bottom: 1px solid var(--border-soft);
   transition: border-color 0.18s ease;
   user-select: none;
+}
+
+.toolbar-main {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding-right: 16px; /* 给右缘淡出留出空隙，滚到底时末尾按钮不被遮罩压住 */
+  scrollbar-width: none;
+}
+
+.toolbar-main::-webkit-scrollbar {
+  display: none;
+}
+
+/* 仅在真正溢出时淡出右缘，避免遮住末尾按钮 */
+.toolbar-main.is-overflow {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
 }
 
 .toolbar-group {
@@ -1028,10 +1049,6 @@ body.sidebar-auto-hidden #editor-header {
   margin: 0 7px;
   flex-shrink: 0;
   transition: background-color 0.18s ease;
-}
-
-.toolbar-spacer {
-  flex: 1;
 }
 
 .tool-btn {
@@ -1085,7 +1102,7 @@ body.sidebar-auto-hidden #editor-header {
 
 /* 视图切换（分段控件） */
 #view-toggle {
-  margin-left: auto; /* 换行后也保持靠右 */
+  flex-shrink: 0; /* 永远留在首行右侧 */
   background: var(--bg-tool-group);
   border-radius: var(--radius-sm);
   padding: 2px;
@@ -2344,7 +2361,8 @@ body.resizing #preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* 高于设置/历史等兄弟弹层：确认框可能从它们内部触发 */
+  z-index: 120;
   animation: overlay-in 0.14s ease;
 }
 
@@ -3113,6 +3131,203 @@ body.resizing #preview {
   opacity: 0.85;
 }
 
+/* ============ 设置 - 快捷键 ============ */
+.settings-shortcuts-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 9px 2px;
+}
+
+.shortcut-row + .shortcut-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.shortcut-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shortcut-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.shortcut-scope {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-tool-group);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.shortcut-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shortcut-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-pane);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.shortcut-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut-chip kbd {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1;
+  color: var(--text);
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--bg-tool-group);
+  box-shadow: inset 0 -1px 0 var(--border-soft);
+}
+
+.chip-remove {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chip-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.shortcut-add {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.shortcut-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut-add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.shortcut-reset {
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.shortcut-reset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.shortcut-unset {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.shortcut-recording {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+
+.shortcut-recording-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+@keyframes shortcut-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--ring);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+}
+
+.shortcut-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+.settings-shortcuts-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-shortcuts-footer .btn-secondary {
+  height: 28px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+
 /* 开关 */
 .switch {
   position: relative;
@@ -3199,6 +3414,22 @@ body.resizing #preview {
   }
 }
 
+/* 中等宽度：先压缩工具栏间距与按钮内边距，尽量避免排版区出现横向滚动 */
+@media (max-width: 1020px) {
+  .toolbar-sep {
+    margin: 0 4px;
+  }
+
+  .tool-btn {
+    min-width: 27px;
+    padding: 0 5px;
+  }
+
+  .view-btn {
+    padding: 0 9px;
+  }
+}
+
 /* 窄窗口：侧栏变为悬浮抽屉（盖在编辑区上方），编辑区占满宽度 */
 @media (max-width: 860px) {
   #sidebar {
@@ -3261,11 +3492,14 @@ body.resizing #preview {
     justify-content: center;
   }
 
-  /* 工具栏：更紧凑，并在空间不足时允许换行 */
+  /* 工具栏：更紧凑，排版按钮区空间不足时换行 */
   #toolbar {
-    flex-wrap: wrap;
     gap: 2px 1px;
     padding: 4px 8px;
+  }
+
+  .toolbar-main {
+    gap: 2px 1px;
   }
 
   .toolbar-group {

@@ -24,6 +24,7 @@ import { initOutline, refreshOutline } from "../outline";
 import { getPreview, initPipeline, openInEditor } from "../pipeline";
 import { initScrollSync } from "../documentPosition";
 import { initShortcuts } from "../shortcuts";
+import { initShortcutSettings } from "../shortcutSettings";
 import { initSidebar } from "../sidebar";
 import { closeTablePopover, initTablePopover, toggleTablePopover } from "../table";
 import { current, deleteMissingPaths, notes } from "../state";
@@ -87,6 +88,7 @@ export async function bootstrapApp(): Promise<void> {
     editorHasFocus,
     onOpenFind: () => openFindPanel(getEditorView(), "query"),
   });
+  initShortcutSettings();
 
   const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
   for (const b of viewButtons) b.addEventListener("click", () => setViewMode(b.dataset.mode));

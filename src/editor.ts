@@ -77,6 +77,7 @@ const saveAsNoteBtn = document.querySelector<HTMLButtonElement>("#save-as-note-b
 const deleteNoteBtn = document.querySelector<HTMLButtonElement>("#delete-note-btn")!;
 const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
 const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
+const toolbarMainEl = document.querySelector<HTMLDivElement>(".toolbar-main")!;
 
 export interface EditorHotPathDeps {
   /** 单次编辑事务：pipeline 同步处理模型、预览与自动保存簿记。 */
@@ -89,6 +90,17 @@ export interface EditorHotPathDeps {
 }
 
 let hotPathDeps: EditorHotPathDeps | null = null;
+
+/* ---------- 工具栏排版区溢出提示 ---------- */
+
+/** 排版按钮区放不下时右缘淡出，提示可横向滚动（单行工具栏不换行） */
+function updateToolbarOverflow(): void {
+  toolbarMainEl.classList.toggle(
+    "is-overflow",
+    toolbarMainEl.scrollWidth > toolbarMainEl.clientWidth + 1,
+  );
+}
+new ResizeObserver(updateToolbarOverflow).observe(toolbarMainEl);
 
 /* ---------- 编辑器头部（随 current 信号联动） ---------- */
 

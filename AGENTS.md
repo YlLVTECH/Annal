@@ -6,7 +6,7 @@ Tauri 2 desktop note app: Rust backend (`src-tauri/`) + vanilla TypeScript front
 
 - `npm run tauri dev` — dev mode (requires Rust toolchain). Vite pinned to port 1420 (`strictPort:true`) in `vite.config.ts:10`; plain `npm run dev` serves frontend without Tauri APIs. HMR on `host:1421` when `TAURI_DEV_HOST` is set.
 - `npm run build` — `tsc && vite build`; `tsc` is the only typecheck. No lint script, no test framework, no CI — verify with `npx tsc --noEmit` + manual dev run. Frontend Rust-style unit tests live in `src-tauri/src/lib.rs:1773` (`cargo test`).
-- `npm run tauri build` — release bundle; installer at `src-tauri/target/release/bundle/nsis/notebook_<ver>_x64-setup.exe`. Release profile `src-tauri/Cargo.toml:22` uses `lto=true` + `strip=true`.
+- `npm run tauri build` — release bundle; installer at `src-tauri/target/release/bundle/nsis/notebook_<ver>_x64-setup.exe`. Release profile `src-tauri/Cargo.toml:22` uses `lto=true` + `strip=true`. NSIS hooks live in `src-tauri/windows/installer-hooks.nsh` (wired via `installerHooks` in `tauri.conf.json`): POSTINSTALL runs `SHChangeNotify(SHCNE_ASSOCCHANGED)` + `ie4uinit -show` so a changed app icon takes effect right after reinstall without a manual icon-cache flush; POSTUNINSTALL notifies so removed associations refresh immediately.
 - Version authoritative in `src-tauri/tauri.conf.json:4` and `src-tauri/Cargo.toml:3` (both `0.2.0`). `package.json:4` is stale `0.1.0`; keep the two Rust-side files in sync when bumping. `index.html:7` settings hardcodes display `v0.2.0` via `dialogs.ts:309`.
 
 ## Architecture

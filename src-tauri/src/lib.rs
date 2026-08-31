@@ -1262,16 +1262,27 @@ fn open_external(url: String) -> Result<(), String> {
 }
 
 /// 在系统文件管理器中显示文件所在位置：
-/// Windows 资源管理器定位选中该文件（`explorer /select,` 必须是单个参数，
-/// 路径含空格时由 Rust 自动加引号，explorer 会解析出逗号后的完整路径）；
+/// Windows 资源管理器定位选中该文件（`explorer /select,` 与路径必须拆成两个参数，
+/// 否则路径含空格时 Rust 会给单个参数整体加引号，explorer 解析失败并退化为打开默认位置）；
 /// macOS Finder 显示文件；文件不存在（被外部删除）时退化为打开其所在目录。
 #[tauri::command]
 fn reveal_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    let ok = std::process::Command::new("explorer")
-        .arg(format!("/select,{path}"))
-        .spawn()
-        .is_ok();
+    let ok = {
+        let p = Path::new(&path);
+        if p.exists() {
+            std::process::Command::new("explorer")
+                .arg("/select,")
+                .arg(&path)
+                .spawn()
+                .is_ok()
+        } else {
+            std::process::Command::new("explorer")
+                .arg(p.parent().unwrap_or_else(|| Path::new(".")))
+                .spawn()
+                .is_ok()
+        }
+    };
     #[cfg(target_os = "macos")]
     let ok = {
         let p = Path::new(&path);

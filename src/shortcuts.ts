@@ -50,7 +50,7 @@ export interface Binding {
 /** 每个命令最多绑定的按键数量 */
 export const MAX_BINDINGS_PER_COMMAND = 3;
 
-const STORAGE_KEY = "notebook:shortcuts";
+const STORAGE_KEY = "annal:shortcuts";
 
 const b = (key: string, ctrl = false, shift = false, alt = false, meta = false): Binding => ({
   key,

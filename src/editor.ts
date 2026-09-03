@@ -392,7 +392,7 @@ export function setViewMode(value: unknown) {
   for (const b of viewButtons) {
     b.classList.toggle("active", b.dataset.mode === mode);
   }
-  localStorage.setItem("notebook:view", mode);
+  localStorage.setItem("annal:view", mode);
   if (mode === "split") applySplitRatio(splitRatio.get());
   else editorWrapEl.style.removeProperty("flex-basis");
   syncEditingState();
@@ -438,7 +438,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   } finally {
     loadingDoc = false;
   }
-  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
+  setLineNumbersEnabled(localStorage.getItem("annal:line-numbers") !== "0");
   v.scrollDOM.scrollTop = 0;
   editorBodyEl.hidden = false;
   editorMainEl.hidden = false;
@@ -905,7 +905,7 @@ export function initSplitResizer() {
       if (splitResizerEl.hasPointerCapture(ev.pointerId)) {
         splitResizerEl.releasePointerCapture(ev.pointerId);
       }
-      localStorage.setItem("notebook:split-ratio", String(splitRatio.get()));
+      localStorage.setItem("annal:split-ratio", String(splitRatio.get()));
       setScrollSyncSuspended(false);
       scheduleSplitResync();
     };
@@ -917,7 +917,7 @@ export function initSplitResizer() {
 
   splitResizerEl.addEventListener("dblclick", () => {
     applySplitRatio(SPLIT_RATIO_DEFAULT);
-    localStorage.setItem("notebook:split-ratio", String(SPLIT_RATIO_DEFAULT));
+    localStorage.setItem("annal:split-ratio", String(SPLIT_RATIO_DEFAULT));
     scheduleSplitResync();
   });
 }

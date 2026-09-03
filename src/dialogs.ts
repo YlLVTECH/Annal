@@ -280,21 +280,21 @@ export function getActiveSettingsCategory(): string {
 
 export function syncSettingsUI() {
   const els = getSettingsElements();
-  els.theme.value = localStorage.getItem("notebook:theme-mode") || "system";
-  els.view.value = parseViewMode(localStorage.getItem("notebook:view"));
-  const savedDensity = localStorage.getItem("notebook:content-density");
+  els.theme.value = localStorage.getItem("annal:theme-mode") || "system";
+  els.view.value = parseViewMode(localStorage.getItem("annal:view"));
+  const savedDensity = localStorage.getItem("annal:content-density");
   els.contentDensity.value = savedDensity === "sparse" || savedDensity === "compact" ? savedDensity : "standard";
-  els.fontSize.value = localStorage.getItem("notebook:font-size") || "15.5";
-  els.fontFamily.value = localStorage.getItem("notebook:font-family") || "serif";
-  els.autosave.checked = localStorage.getItem("notebook:autosave") !== "0";
-  els.autosaveDelay.value = localStorage.getItem("notebook:autosave-delay") || "500";
-  els.sidebarWidth.value = localStorage.getItem("notebook:sidebar-width") || "260";
-  els.lineNumbers.checked = localStorage.getItem("notebook:line-numbers") !== "0";
+  els.fontSize.value = localStorage.getItem("annal:font-size") || "15.5";
+  els.fontFamily.value = localStorage.getItem("annal:font-family") || "serif";
+  els.autosave.checked = localStorage.getItem("annal:autosave") !== "0";
+  els.autosaveDelay.value = localStorage.getItem("annal:autosave-delay") || "500";
+  els.sidebarWidth.value = localStorage.getItem("annal:sidebar-width") || "260";
+  els.lineNumbers.checked = localStorage.getItem("annal:line-numbers") !== "0";
 
-  const savedCategory = localStorage.getItem("notebook:settings-category") || "appearance";
+  const savedCategory = localStorage.getItem("annal:settings-category") || "appearance";
   switchSettingsCategory(savedCategory);
 
-  const currentLocale = localStorage.getItem("notebook:locale") || "zh-CN";
+  const currentLocale = localStorage.getItem("annal:locale") || "zh-CN";
   els.language.innerHTML = "";
   for (const locale of getAvailableLocales()) {
     const opt = document.createElement("option");

@@ -5,7 +5,7 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/icon.png" />
-    <title data-i18n="app.title">笔记本</title>
+    <title data-i18n="app.title">Annal</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
@@ -14,7 +14,7 @@
       <!-- 自定义标题栏（无系统边框：整条可拖拽，双击最大化） -->
       <header id="titlebar" data-tauri-drag-region>
         <div class="titlebar-left">
-          <span class="titlebar-title" data-i18n="app.title">笔记本</span>
+          <span class="titlebar-title" data-i18n="app.title">Annal</span>
         </div>
         <div class="titlebar-actions">
           <button id="open-file-btn" class="titlebar-btn" data-i18n-title="titlebar.openFile" data-i18n-aria="titlebar.openFile" title="打开 Markdown 文件 (Ctrl+O)" aria-label="打开文件">
@@ -323,6 +323,13 @@
                   <option value="light" data-i18n="settings.theme.light">浅色</option>
                   <option value="dark" data-i18n="settings.theme.dark">深色</option>
                 </select>
+              </div>
+              <div class="settings-row settings-row-wrap">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.palette">配色方案</span>
+                  <span class="settings-desc" data-i18n="settings.palette.desc">浅色主题下的界面分层配色，深色主题保持默认</span>
+                </div>
+                <div id="setting-palette" class="palette-options" role="radiogroup"></div>
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">

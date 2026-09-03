@@ -15,14 +15,14 @@ export const openFiles = signal<OpenFile[]>([]);
 export const current = signal<Source | null>(null);
 export const dirty = signal(false);
 
-export const viewMode = signal<ViewMode>(parseViewMode(localStorage.getItem("notebook:view")));
+export const viewMode = signal<ViewMode>(parseViewMode(localStorage.getItem("annal:view")));
 export const contentDensity = signal(readContentDensity());
 export const sidebarWidth = signal(
-  Number(localStorage.getItem("notebook:sidebar-width")) || 260,
+  Number(localStorage.getItem("annal:sidebar-width")) || 260,
 );
-export const sidebarHidden = signal(localStorage.getItem("notebook:sidebar") === "hidden");
+export const sidebarHidden = signal(localStorage.getItem("annal:sidebar") === "hidden");
 export const splitRatio = signal(
-  Number(localStorage.getItem("notebook:split-ratio")) || 0.5,
+  Number(localStorage.getItem("annal:split-ratio")) || 0.5,
 );
 
 /** 已被外部删除的路径集合（整体替换；统一小写比较，Windows 路径不区分大小写） */
@@ -32,7 +32,7 @@ export const closing = signal(false);
 
 export const listPage = signal(1);
 export const listPageSize = signal(
-  Number(localStorage.getItem("notebook:list-page-size")) || LIST_PAGE_SIZE,
+  Number(localStorage.getItem("annal:list-page-size")) || LIST_PAGE_SIZE,
 );
 
 /** 多选状态：列表项唯一标识（note id 或文件路径）；整体替换语义 */

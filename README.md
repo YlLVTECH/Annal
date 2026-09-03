@@ -1,4 +1,4 @@
-# 笔记本 (Notebook)
+# 笔记本 (Annal)
 
 极简桌面笔记应用，基于 **Tauri 2 + Vite + 原生 TypeScript + Rust**。
 
@@ -47,9 +47,9 @@
 自动同步改名；标题中的非法字符（如 `:` `/` `*`）会被清理成空格，与已有文件
 重名时自动追加序号（如 `标题 (1).md`），绝不覆盖已有文件。
 
-应用数据目录由 Tauri 管理（Windows 为 `%APPDATA%\com.notebook.desktop`，
-macOS 为 `~/Library/Application Support/com.notebook.desktop`，Linux 为
-`~/.local/share/com.notebook.desktop`）。
+应用数据目录由 Tauri 管理（Windows 为 `%APPDATA%\com.annal.desktop`，
+macOS 为 `~/Library/Application Support/com.annal.desktop`，Linux 为
+`~/.local/share/com.annal.desktop`）。
 
 ## 开发
 
@@ -66,7 +66,7 @@ npm run tauri dev      # 启动开发模式（热更新）
 ```bash
 npm run tauri build
 # Windows 下生成 NSIS 安装向导（.exe）：
-#   src-tauri/target/release/bundle/nsis/notebook_0.1.0_x64-setup.exe
+#   src-tauri/target/release/bundle/nsis/annal_<ver>_x64-setup.exe
 ```
 
 打包过程：`npm run build`（前端）→ cargo release 编译（Rust）→ tauri-bundler
@@ -80,7 +80,7 @@ npm run tauri build
   正式分发可申请代码签名证书（如 DigiCert / 沃通）。
 - 版本号改 `tauri.conf.json` 的 `version` 字段。
 - 文件关联（双击打开 .md）在安装时由 NSIS 写入注册表；
-  使用 `npm run tauri dev` 或直接运行 `target/release/notebook.exe 文件.md` 也可验证打开效果。
+  使用 `npm run tauri dev` 或直接运行 `target/release/annal.exe 文件.md` 也可验证打开效果。
 
 ## 项目结构
 

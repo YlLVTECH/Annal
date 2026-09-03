@@ -58,7 +58,7 @@ export async function bootstrapApp(): Promise<void> {
 
   // 2. 编辑管线（Editor -> Model -> Preview）及其消费者
   initPipeline(refreshOutline);
-  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
+  setLineNumbersEnabled(localStorage.getItem("annal:line-numbers") !== "0");
   initScrollSync({ getEditorView, getPreview });
   initOutline({ getEditorView, getPreview, flashHeading: flashHeadingAtLine });
 

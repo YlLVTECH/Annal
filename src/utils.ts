@@ -18,7 +18,7 @@ export const SPLIT_RATIO_MAX = 0.8;
 export const LIST_PAGE_SIZE = 10;
 
 export function readContentDensity(): ContentDensity {
-  const saved = localStorage.getItem("notebook:content-density");
+  const saved = localStorage.getItem("annal:content-density");
   return saved === "sparse" || saved === "compact" ? saved : "standard";
 }
 

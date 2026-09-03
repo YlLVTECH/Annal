@@ -34,7 +34,7 @@ const outlinePanelEl = document.querySelector<HTMLElement>("#outline-pane")!;
 const outlineListEl = document.querySelector<HTMLUListElement>("#outline-list")!;
 const outlineEmptyEl = document.querySelector<HTMLElement>("#outline-empty")!;
 
-const OUTLINE_KEY = "notebook:outline";
+const OUTLINE_KEY = "annal:outline";
 /** 大纲面板刷新防抖：打字时合并多次文档变更，避免每键全量重建目录树 */
 const OUTLINE_REFRESH_DELAY_MS = 200;
 

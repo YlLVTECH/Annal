@@ -1,0 +1,65 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build exe & upload to Release
+    runs-on: windows-latest
+    permissions:
+      contents: write # 创建/更新 GitHub Release 需要写权限
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # 标签触发时用推送的标签；手动触发时取 tauri.conf.json 里的版本号拼 v<version>
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # tauri-action 会自动执行 beforeBuildCommand（tsc && vite build），
+      # 再 cargo build --release 并打 NSIS 包，把产物（annal_<ver>_x64-setup.exe）上传到对应 Release。
+      - name: Build Tauri app & upload to GitHub Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.tag.outputs.tag }}
+          releaseName: Annal ${{ steps.tag.outputs.tag }}
+          releaseBody: |
+            Annal ${{ steps.tag.outputs.tag }} 自动打包发布。
+
+            安装包：`annal_<version>_x64-setup.exe`（NSIS 安装程序，含简体中文/英文）。
+            > 由 GitHub Actions 在 windows-latest 上自动构建。
+          # 一键直发：构建完成即公开发布
+          releaseDraft: false
+          prerelease: false

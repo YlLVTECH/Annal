@@ -1,6 +1,6 @@
 [package]
 name = "annal"
-version = "0.2.0"
+version = "0.3.0"
 description = "极简桌面笔记应用"
 authors = ["you"]
 edition = "2021"

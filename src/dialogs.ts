@@ -305,7 +305,7 @@ export function syncSettingsUI() {
 
   // 填充版本号（与 tauri.conf.json / Cargo.toml 保持一致）
   if (settingsVersionEl) {
-    settingsVersionEl.textContent = "v0.2.0";
+    settingsVersionEl.textContent = "v0.3.0";
   }
 
   return els;

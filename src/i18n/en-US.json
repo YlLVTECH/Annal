@@ -110,7 +110,7 @@
   "settings.language": "Language",
   "settings.language.desc": "Interface display language",
   "settings.appName": "Annal",
-  "settings.version": "v0.2.0",
+  "settings.version": "v0.3.0",
   "settings.feedback": "Report a Bug",
   "settings.feedback.desc": "Have an issue or suggestion? Send us feedback",
   "settings.feedback.btn": "Send Feedback",

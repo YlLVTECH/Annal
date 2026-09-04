@@ -15,7 +15,6 @@ dist-ssr
 
 # Editor directories and files
 .vscode/*
-!.vscode/extensions.json
 .idea
 .DS_Store
 *.suo
@@ -35,3 +34,6 @@ scripts/.model-bundle.mjs
 # ZCode workspace
 .zcode/
 rustup-init.exe
+
+# 水墨风格展示页（仅本地保留，不入库）
+showcase/

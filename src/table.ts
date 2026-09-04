@@ -292,14 +292,14 @@ function buildTpGrid() {
 
 function persistTableOpts() {
   localStorage.setItem(
-    "notebook:table-opts",
+    "annal:table-opts",
     JSON.stringify({ header: tpHeaderEl.checked, align: tpAlign }),
   );
 }
 
 function loadTableOpts() {
   try {
-    const o = JSON.parse(localStorage.getItem("notebook:table-opts") ?? "null") as
+    const o = JSON.parse(localStorage.getItem("annal:table-opts") ?? "null") as
       | { header?: boolean; align?: Align }
       | null;
     if (o && typeof o === "object") {

@@ -16,8 +16,27 @@ export function applyTheme(theme: "light" | "dark") {
 export function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   applyTheme(next);
-  localStorage.setItem("notebook:theme", next);
-  localStorage.setItem("notebook:theme-mode", next);
+  localStorage.setItem("annal:theme", next);
+  localStorage.setItem("annal:theme-mode", next);
+}
+
+// 配色方案：仅作用于浅色主题（styles.css 中 html[data-theme="light"][data-palette="..."] 变量块），
+// 深色主题保持默认。新增方案 = styles.css 加一个变量块 + 这里加一个条目 + i18n 补 settings.palette.<id>。
+export interface PaletteOption {
+  id: string;
+  /** 设置面板色板用：按分层顺序取色（外层底 -> 面板底 -> 边框 -> 强调色） */
+  swatch: [string, string, string, string];
+}
+
+export const PALETTE_OPTIONS: PaletteOption[] = [
+  { id: "classic", swatch: ["#f6f6f4", "#ffffff", "#d9d9d5", "#2563eb"] },
+  { id: "sakura", swatch: ["#ffe3e1", "#fff5e4", "#ffd1d1", "#ff9494"] },
+  { id: "mist", swatch: ["#c8dfdb", "#f2efe7", "#66a3bf", "#3368a0"] },
+];
+
+export function applyPalette(id: string) {
+  const known = PALETTE_OPTIONS.some((p) => p.id === id);
+  document.documentElement.dataset.palette = known ? id : "classic";
 }
 
 export function getSystemTheme(): "light" | "dark" {

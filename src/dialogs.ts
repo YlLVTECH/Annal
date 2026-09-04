@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { current, notes } from "./state";
-import { parseViewMode } from "./types";
 import { getAvailableLocales, t } from "./i18n";
 import type { CtxItem, NoteVersion } from "./types";
 
@@ -23,7 +22,6 @@ const commitCancelBtn = document.querySelector<HTMLButtonElement>("#commit-cance
 
 const settingsOverlayEl = document.querySelector<HTMLDivElement>("#settings-overlay")!;
 const settingThemeEl = document.querySelector<HTMLSelectElement>("#setting-theme")!;
-const settingViewEl = document.querySelector<HTMLSelectElement>("#setting-view")!;
 const settingContentDensityEl = document.querySelector<HTMLSelectElement>("#setting-content-density")!;
 const settingFontSizeEl = document.querySelector<HTMLSelectElement>("#setting-font-size")!;
 const settingFontFamilyEl = document.querySelector<HTMLSelectElement>("#setting-font-family")!;
@@ -31,6 +29,7 @@ const settingAutosaveEl = document.querySelector<HTMLInputElement>("#setting-aut
 const settingAutosaveDelayEl = document.querySelector<HTMLSelectElement>("#setting-autosave-delay")!;
 const settingSidebarWidthEl = document.querySelector<HTMLSelectElement>("#setting-sidebar-width")!;
 const settingLineNumbersEl = document.querySelector<HTMLInputElement>("#setting-line-numbers")!;
+const settingLiveRenderEl = document.querySelector<HTMLInputElement>("#setting-live-render")!;
 const settingLanguageEl = document.querySelector<HTMLSelectElement>("#setting-language")!;
 const feedbackBtnEl = document.querySelector<HTMLButtonElement>("#feedback-btn")!;
 const settingsVersionEl = document.querySelector<HTMLSpanElement>("#settings-version")!;
@@ -246,7 +245,6 @@ export function getSettingsElements() {
   return {
     overlay: settingsOverlayEl,
     theme: settingThemeEl,
-    view: settingViewEl,
     contentDensity: settingContentDensityEl,
     fontSize: settingFontSizeEl,
     fontFamily: settingFontFamilyEl,
@@ -254,6 +252,7 @@ export function getSettingsElements() {
     autosaveDelay: settingAutosaveDelayEl,
     sidebarWidth: settingSidebarWidthEl,
     lineNumbers: settingLineNumbersEl,
+    liveRender: settingLiveRenderEl,
     language: settingLanguageEl,
   };
 }
@@ -280,21 +279,21 @@ export function getActiveSettingsCategory(): string {
 
 export function syncSettingsUI() {
   const els = getSettingsElements();
-  els.theme.value = localStorage.getItem("notebook:theme-mode") || "system";
-  els.view.value = parseViewMode(localStorage.getItem("notebook:view"));
-  const savedDensity = localStorage.getItem("notebook:content-density");
+  els.theme.value = localStorage.getItem("annal:theme-mode") || "system";
+  const savedDensity = localStorage.getItem("annal:content-density");
   els.contentDensity.value = savedDensity === "sparse" || savedDensity === "compact" ? savedDensity : "standard";
-  els.fontSize.value = localStorage.getItem("notebook:font-size") || "15.5";
-  els.fontFamily.value = localStorage.getItem("notebook:font-family") || "serif";
-  els.autosave.checked = localStorage.getItem("notebook:autosave") !== "0";
-  els.autosaveDelay.value = localStorage.getItem("notebook:autosave-delay") || "500";
-  els.sidebarWidth.value = localStorage.getItem("notebook:sidebar-width") || "260";
-  els.lineNumbers.checked = localStorage.getItem("notebook:line-numbers") !== "0";
+  els.fontSize.value = localStorage.getItem("annal:font-size") || "15.5";
+  els.fontFamily.value = localStorage.getItem("annal:font-family") || "serif";
+  els.autosave.checked = localStorage.getItem("annal:autosave") !== "0";
+  els.autosaveDelay.value = localStorage.getItem("annal:autosave-delay") || "500";
+  els.sidebarWidth.value = localStorage.getItem("annal:sidebar-width") || "260";
+  els.lineNumbers.checked = localStorage.getItem("annal:line-numbers") !== "0";
+  els.liveRender.checked = localStorage.getItem("annal:live-render") !== "0";
 
-  const savedCategory = localStorage.getItem("notebook:settings-category") || "appearance";
+  const savedCategory = localStorage.getItem("annal:settings-category") || "appearance";
   switchSettingsCategory(savedCategory);
 
-  const currentLocale = localStorage.getItem("notebook:locale") || "zh-CN";
+  const currentLocale = localStorage.getItem("annal:locale") || "zh-CN";
   els.language.innerHTML = "";
   for (const locale of getAvailableLocales()) {
     const opt = document.createElement("option");
@@ -306,7 +305,7 @@ export function syncSettingsUI() {
 
   // 填充版本号（与 tauri.conf.json / Cargo.toml 保持一致）
   if (settingsVersionEl) {
-    settingsVersionEl.textContent = "v0.2.0";
+    settingsVersionEl.textContent = "v0.3.0";
   }
 
   return els;

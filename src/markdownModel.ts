@@ -70,7 +70,7 @@ function isRemoteSrc(src: string): boolean {
 }
 
 /** 图片 src 解析：相对路径基于笔记所在目录，并转换为 asset 协议 URL */
-function resolveImgSrc(src: string, baseDir: string): string {
+export function resolveImgSrc(src: string, baseDir: string): string {
   if (isRemoteSrc(src)) return src;
   let p = src.replace(/\\/g, "/");
   if (!p.startsWith("/") && !/^[A-Za-z]:\//.test(p) && baseDir) {
@@ -97,6 +97,11 @@ let renderBaseDir = "";
 /** 设置当前笔记所在目录（打开/切换笔记时调用） */
 export function setRenderBaseDir(dir: string) {
   renderBaseDir = dir;
+}
+
+/** 当前笔记所在目录（编辑器即时渲染解析相对路径图片用） */
+export function getRenderBaseDir(): string {
+  return renderBaseDir;
 }
 
 /* ---------- 按 src 缓存的图片宽高比 ----------

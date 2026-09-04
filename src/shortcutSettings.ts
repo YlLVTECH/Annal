@@ -321,13 +321,6 @@ const HINT_TARGETS: Array<{ selector: string; command: CommandId; labelKey: stri
   { selector: '.tool-btn[data-cmd="bold"]', command: "bold", labelKey: "toolbar.bold" },
   { selector: '.tool-btn[data-cmd="italic"]', command: "italic", labelKey: "toolbar.italic" },
   { selector: '.tool-btn[data-cmd="link"]', command: "link", labelKey: "toolbar.link" },
-  { selector: '#view-toggle .view-btn[data-mode="edit"]', command: "viewEdit", labelKey: "toolbar.view.edit" },
-  { selector: '#view-toggle .view-btn[data-mode="split"]', command: "viewSplit", labelKey: "toolbar.view.split" },
-  {
-    selector: '#view-toggle .view-btn[data-mode="preview"]',
-    command: "viewPreview",
-    labelKey: "toolbar.view.preview",
-  },
 ];
 
 function refreshShortcutHints() {

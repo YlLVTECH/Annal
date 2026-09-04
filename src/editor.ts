@@ -7,7 +7,6 @@
 
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { closeTablePopover } from "./table";
 import { showContextMenu } from "./dialogs";
 import { bus } from "./events";
 import type { CtxItem, Source } from "./types";
@@ -41,22 +40,18 @@ import {
 } from "@codemirror/commands";
 import { bracketMatching, indentUnit } from "@codemirror/language";
 import { insertNewlineContinueMarkup, markdown } from "@codemirror/lang-markdown";
+import { liveRenderExtension } from "./liveRender";
 import { closeFindPanel, findReplaceExtension } from "./findReplace";
-import { setScrollSyncSuspended, scheduleResync as scheduleSplitResync } from "./documentPosition";
 import {
   current,
   currentPathOf,
   dirty,
   missingPaths,
   notes,
-  splitRatio,
-  viewMode,
 } from "./state";
 import { pathKey } from "./utils";
-import { IMAGE_EXT_RE, SPLIT_RATIO_DEFAULT, SPLIT_RATIO_MAX, SPLIT_RATIO_MIN } from "./utils";
-import { parseViewMode } from "./types";
+import { IMAGE_EXT_RE } from "./utils";
 import { t } from "./i18n";
-import type { ViewMode } from "./types";
 
 /* ---------- DOM 元素 ---------- */
 const editorHeaderEl = document.querySelector<HTMLDivElement>("#editor-header")!;
@@ -67,15 +62,12 @@ const editorEmptyEl = document.querySelector<HTMLDivElement>("#editor-empty")!;
 const toolbarEl = document.querySelector<HTMLDivElement>("#toolbar")!;
 const editorBodyEl = document.querySelector<HTMLDivElement>("#editor-body")!;
 const editorMainEl = document.querySelector<HTMLDivElement>("#editor-main")!;
-const editorWrapEl = document.querySelector<HTMLDivElement>("#editor-wrap")!;
-const splitResizerEl = document.querySelector<HTMLDivElement>("#split-resizer")!;
 const mountEl = document.querySelector<HTMLDivElement>("#editor")!;
 const statusbarEl = document.querySelector<HTMLDivElement>("#statusbar")!;
 const wordCountEl = document.querySelector<HTMLSpanElement>("#word-count")!;
 const commitNoteBtn = document.querySelector<HTMLButtonElement>("#commit-note-btn")!;
 const saveAsNoteBtn = document.querySelector<HTMLButtonElement>("#save-as-note-btn")!;
 const deleteNoteBtn = document.querySelector<HTMLButtonElement>("#delete-note-btn")!;
-const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
 const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
 const toolbarMainEl = document.querySelector<HTMLDivElement>(".toolbar-main")!;
 
@@ -147,8 +139,10 @@ function syncMissingBadge(): void {
 
 /* ---------- CodeMirror 视图与状态 ---------- */
 let view: EditorView | null = null;
-const readOnlyCompartment = new Compartment();
 const lineNumbersCompartment = new Compartment();
+const liveRenderCompartment = new Compartment();
+/** 即时渲染开关（模块级：showEditor 重建 State 时也要带上当前值） */
+let liveRenderEnabled = localStorage.getItem("annal:live-render") !== "0";
 
 /* ---------- 大纲跳转：目标标题行短暂高亮 ---------- */
 const setHeadingFlash = StateEffect.define<number | null>();
@@ -202,8 +196,9 @@ function getExtensions(): Extension[] {
     bracketMatching(),
     indentUnit.of("  "),
     markdown(),
+    liveRenderCompartment.of(liveRenderEnabled ? liveRenderExtension : []),
     placeholderCompartment.of(placeholder(t("editor.placeholder") || "开始输入…")),
-    readOnlyCompartment.of(EditorState.readOnly.of(false)),
+    EditorState.readOnly.of(false),
     EditorView.contentAttributes.of({
       spellcheck: "false",
       autocapitalize: "off",
@@ -308,7 +303,7 @@ export function editorHasFocus(): boolean {
 }
 
 export function canEditCurrent(): boolean {
-  return current.get() !== null && viewMode.get() !== "preview" && !editorBodyEl.hidden;
+  return current.get() !== null && !editorBodyEl.hidden;
 }
 
 export function isComposing(): boolean {
@@ -384,32 +379,7 @@ function scheduleCount() {
   countTimer = window.setTimeout(updateCount, 250);
 }
 
-/* ---------- 视图模式 ---------- */
-export function setViewMode(value: unknown) {
-  const mode = parseViewMode(value);
-  viewMode.set(mode);
-  editorBodyEl.className = `mode-${mode}`;
-  for (const b of viewButtons) {
-    b.classList.toggle("active", b.dataset.mode === mode);
-  }
-  localStorage.setItem("notebook:view", mode);
-  if (mode === "split") applySplitRatio(splitRatio.get());
-  else editorWrapEl.style.removeProperty("flex-basis");
-  syncEditingState();
-  if (view) {
-    view.dispatch({
-      effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(mode === "preview")),
-    });
-  }
-  // 预览可见性/刷新/分屏重同步由 pipeline 订阅 view:mode 统一处理
-  bus.emit("view:mode", { mode });
-  if (mode !== "preview" && view && !view.hasFocus) view.focus();
-}
-
-export function getViewMode(): ViewMode {
-  return viewMode.get();
-}
-
+/* ---------- 行号 / 即时渲染开关 ---------- */
 export function setLineNumbersEnabled(enabled: boolean) {
   if (!view) return;
   view.dispatch({
@@ -417,15 +387,19 @@ export function setLineNumbersEnabled(enabled: boolean) {
   });
 }
 
+/** 即时渲染开关：切换编辑器内联渲染装饰（默认开，annal:live-render） */
+export function setLiveRenderEnabled(enabled: boolean) {
+  liveRenderEnabled = enabled;
+  if (!view) return;
+  view.dispatch({
+    effects: liveRenderCompartment.reconfigure(enabled ? liveRenderExtension : []),
+  });
+}
+
 function syncEditingState() {
-  const readOnly = viewMode.get() === "preview";
   const hasDoc = current.get() !== null;
   for (const button of toolButtons) {
-    if (button.id !== "outline-toggle") button.disabled = readOnly || !hasDoc;
-  }
-  if (readOnly) {
-    closeTablePopover();
-    view?.contentDOM.blur();
+    if (button.id !== "outline-toggle") button.disabled = !hasDoc;
   }
 }
 
@@ -438,7 +412,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   } finally {
     loadingDoc = false;
   }
-  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
+  setLineNumbersEnabled(localStorage.getItem("annal:line-numbers") !== "0");
   v.scrollDOM.scrollTop = 0;
   editorBodyEl.hidden = false;
   editorMainEl.hidden = false;
@@ -452,7 +426,7 @@ export function showEditor(title: string, content: string, pathHint = "") {
   setCountStatsFromText(content);
   updateCount();
   setSaveStatus("idle", "");
-  if (viewMode.get() !== "preview") v.focus();
+  v.focus();
 }
 
 export function closeEditor() {
@@ -798,9 +772,8 @@ function selectAllInEditor(view: EditorView) {
 
 /* ---------- 生命周期 ---------- */
 
-export function initEditor(previewElement: HTMLElement, deps: EditorHotPathDeps) {
+export function initEditor(deps: EditorHotPathDeps) {
   hotPathDeps = deps;
-  initSplitResizer();
 
   view = new EditorView({
     parent: mountEl,
@@ -825,21 +798,6 @@ export function initEditor(previewElement: HTMLElement, deps: EditorHotPathDeps)
     syncHeaderButtons(current.get());
     updateEditorPlaceholder();
   });
-
-  // 预览区链接点击：按住 Ctrl 时才调用系统浏览器打开，否则保持默认行为
-  previewElement.addEventListener("click", async (e) => {
-    const a = (e.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[href]");
-    if (!a) return;
-    const href = a.getAttribute("href");
-    if (!href || !/^https?:/i.test(href)) return;
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    try {
-      await invoke("open_external", { url: href });
-    } catch {
-      window.open(href, "_blank");
-    }
-  });
 }
 
 function sameSource(a: Source | null, b: Source | null): boolean {
@@ -847,77 +805,4 @@ function sameSource(a: Source | null, b: Source | null): boolean {
   if (a.kind === "note" && b.kind === "note") return a.id === b.id;
   if (a.kind === "file" && b.kind === "file") return a.path === b.path;
   return false;
-}
-
-/* ---------- 分屏分割条拖拽 ---------- */
-
-const SPLIT_GAP_PX = 5;
-let splitLayoutRaf = 0;
-
-function applySplitRatio(ratio: number) {
-  splitRatio.set(Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio)));
-  scheduleSplitLayout();
-}
-
-function updateSplitLayout() {
-  splitLayoutRaf = 0;
-  if (viewMode.get() !== "split") return;
-  const vertical = window.matchMedia("(max-width: 720px)").matches;
-  const size = vertical ? editorBodyEl.clientHeight : editorBodyEl.clientWidth;
-  const usable = Math.max(0, size - SPLIT_GAP_PX);
-  editorWrapEl.style.flexBasis = `${Math.round(usable * splitRatio.get())}px`;
-}
-
-function scheduleSplitLayout() {
-  if (splitLayoutRaf) return;
-  splitLayoutRaf = requestAnimationFrame(updateSplitLayout);
-}
-
-export function initSplitResizer() {
-  applySplitRatio(splitRatio.get());
-  new ResizeObserver(() => {
-    scheduleSplitLayout();
-    scheduleSplitResync();
-  }).observe(editorBodyEl);
-
-  splitResizerEl.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    splitResizerEl.setPointerCapture(e.pointerId);
-    document.body.classList.add("resizing");
-    setScrollSyncSuspended(true);
-
-    const vertical = window.matchMedia("(max-width: 720px)").matches;
-    const startPos = vertical ? e.clientY : e.clientX;
-    const startSize = vertical ? editorBodyEl.clientHeight : editorBodyEl.clientWidth;
-    const startRatio = splitRatio.get();
-
-    const onMove = (ev: PointerEvent) => {
-      const currentPos = vertical ? ev.clientY : ev.clientX;
-      const usable = Math.max(1, startSize - SPLIT_GAP_PX);
-      applySplitRatio(startRatio + (currentPos - startPos) / usable);
-    };
-
-    const onUp = (ev: PointerEvent) => {
-      document.body.classList.remove("resizing");
-      splitResizerEl.removeEventListener("pointermove", onMove);
-      splitResizerEl.removeEventListener("pointerup", onUp);
-      splitResizerEl.removeEventListener("pointercancel", onUp);
-      if (splitResizerEl.hasPointerCapture(ev.pointerId)) {
-        splitResizerEl.releasePointerCapture(ev.pointerId);
-      }
-      localStorage.setItem("notebook:split-ratio", String(splitRatio.get()));
-      setScrollSyncSuspended(false);
-      scheduleSplitResync();
-    };
-
-    splitResizerEl.addEventListener("pointermove", onMove);
-    splitResizerEl.addEventListener("pointerup", onUp);
-    splitResizerEl.addEventListener("pointercancel", onUp);
-  });
-
-  splitResizerEl.addEventListener("dblclick", () => {
-    applySplitRatio(SPLIT_RATIO_DEFAULT);
-    localStorage.setItem("notebook:split-ratio", String(SPLIT_RATIO_DEFAULT));
-    scheduleSplitResync();
-  });
 }

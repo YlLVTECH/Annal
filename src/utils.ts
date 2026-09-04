@@ -11,14 +11,10 @@ export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const SIDEBAR_MIN_WIDTH = 210;
 export const SIDEBAR_MAX_WIDTH = 460;
 
-export const SPLIT_RATIO_DEFAULT = 0.5;
-export const SPLIT_RATIO_MIN = 0.2;
-export const SPLIT_RATIO_MAX = 0.8;
-
 export const LIST_PAGE_SIZE = 10;
 
 export function readContentDensity(): ContentDensity {
-  const saved = localStorage.getItem("notebook:content-density");
+  const saved = localStorage.getItem("annal:content-density");
   return saved === "sparse" || saved === "compact" ? saved : "standard";
 }
 

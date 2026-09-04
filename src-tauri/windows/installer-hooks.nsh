@@ -1,4 +1,4 @@
-; Custom NSIS installer hooks for Notebook.
+; Custom NSIS installer hooks for Annal.
 ; Included by tauri-bundler when bundle.windows.nsis.installerHooks is set.
 ; Macro names must match the tauri NSIS template guards (!ifmacrodef).
 

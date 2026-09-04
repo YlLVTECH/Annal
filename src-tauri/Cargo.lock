@@ -53,6 +53,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "annal"
+version = "0.3.0"
+dependencies = [
+ "flate2",
+ "notify",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2309,23 +2326,6 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
-
-[[package]]
-name = "notebook"
-version = "0.2.0"
-dependencies = [
- "flate2",
- "notify",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "uuid",
- "zip",
-]
 
 [[package]]
 name = "notify"

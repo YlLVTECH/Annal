@@ -103,7 +103,7 @@ const DEFAULT_MESSAGES: Record<string, string> = {
   "outline.toggle": "显示 / 隐藏大纲",
 };
 
-let currentLocale = (localStorage.getItem("notebook:locale") as string | null) ?? DEFAULT_LOCALE;
+let currentLocale = (localStorage.getItem("annal:locale") as string | null) ?? DEFAULT_LOCALE;
 let currentMessages: Record<string, string> = { ...DEFAULT_MESSAGES };
 
 async function loadMessages(locale: string): Promise<Record<string, string>> {
@@ -140,7 +140,7 @@ export function t(key: string, params?: TranslateParams): string {
 export async function setLocale(locale: string) {
   if (locale === currentLocale) return;
   currentLocale = locale;
-  localStorage.setItem("notebook:locale", locale);
+  localStorage.setItem("annal:locale", locale);
   currentMessages = await loadMessages(locale);
   document.documentElement.lang = locale;
 }

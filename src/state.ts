@@ -6,24 +6,19 @@
 // - 高频路径（每键输入）只触碰 dirty（Object.is 判等，重复置 true 不通知）。
 
 import { signal } from "./signal";
-import { parseViewMode } from "./types";
 import { LIST_PAGE_SIZE, readContentDensity } from "./utils";
-import type { NoteMeta, OpenFile, Source, ViewMode } from "./types";
+import type { NoteMeta, OpenFile, Source } from "./types";
 
 export const notes = signal<NoteMeta[]>([]);
 export const openFiles = signal<OpenFile[]>([]);
 export const current = signal<Source | null>(null);
 export const dirty = signal(false);
 
-export const viewMode = signal<ViewMode>(parseViewMode(localStorage.getItem("notebook:view")));
 export const contentDensity = signal(readContentDensity());
 export const sidebarWidth = signal(
-  Number(localStorage.getItem("notebook:sidebar-width")) || 260,
+  Number(localStorage.getItem("annal:sidebar-width")) || 260,
 );
-export const sidebarHidden = signal(localStorage.getItem("notebook:sidebar") === "hidden");
-export const splitRatio = signal(
-  Number(localStorage.getItem("notebook:split-ratio")) || 0.5,
-);
+export const sidebarHidden = signal(localStorage.getItem("annal:sidebar") === "hidden");
 
 /** 已被外部删除的路径集合（整体替换；统一小写比较，Windows 路径不区分大小写） */
 export const missingPaths = signal<ReadonlySet<string>>(new Set<string>());
@@ -32,7 +27,7 @@ export const closing = signal(false);
 
 export const listPage = signal(1);
 export const listPageSize = signal(
-  Number(localStorage.getItem("notebook:list-page-size")) || LIST_PAGE_SIZE,
+  Number(localStorage.getItem("annal:list-page-size")) || LIST_PAGE_SIZE,
 );
 
 /** 多选状态：列表项唯一标识（note id 或文件路径）；整体替换语义 */

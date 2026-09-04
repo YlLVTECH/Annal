@@ -67,7 +67,7 @@ const CODE_SAMPLES = [
   [
     "set -eux",
     "cargo build --release",
-    "cp target/release/notebook.exe dist/",
+    "cp target/release/annal.exe dist/",
     "echo done",
   ],
 ];

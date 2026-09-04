@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Notebook",
-  "version": "0.2.0",
-  "identifier": "com.notebook.desktop",
+  "productName": "Annal",
+  "version": "0.3.0",
+  "identifier": "com.annal.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "笔记本",
+        "title": "Annal",
         "width": 1000,
         "height": 700,
         "minWidth": 640,

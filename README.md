@@ -1,105 +1,108 @@
-# 笔记本 (Notebook)
+# Annal（笔记本）
+
+> [English](README.en.md) | 简体中文
 
 极简桌面笔记应用，基于 **Tauri 2 + Vite + 原生 TypeScript + Rust**。
+一个 Markdown 文件即一篇笔记，文件保存在你自己选择的位置；内建 git 式版本历史，每次显式提交都是一份可追溯、可恢复的记录。
 
 ## 功能
 
-- 新建 / 编辑 / 删除笔记，输入自动保存（防抖 500ms），标题自动取正文第一行；
-  **文件名与笔记名称保持一致**（标题变化时磁盘文件自动同步改名，非法字符自动清理、重名自动加序号）
-- 右键笔记 / 外部文件可「打开文件所在位置」，在系统文件管理器中定位该文件
-- 工具栏随窗口宽度自动换行排布，窄窗口下按钮依然完整可见（视图切换保持靠右）
-- **打开外部 Markdown 文件**：
-  - 点击侧边栏 📂 或 `Ctrl+O` 通过文件对话框打开（支持多选）
-  - 直接把 `.md` / `.markdown` 文件拖进窗口即可打开
-  - 安装后注册文件关联：在资源管理器里双击 `.md` / `.markdown` 文件直接用本应用打开
-  - 外部文件在侧边栏"外部文件"分组独立显示，编辑后自动保存回原路径；
-    右上角按钮为"关闭"（不会删除磁盘上的文件）
-  - **另存为笔记**：外部文件可一键复制到所选新位置并纳入笔记索引
-    （编辑器右上角「存为笔记」按钮，或右键菜单「另存为笔记」），
-    原文件保持不动；新笔记从此支持版本提交 / 历史管理 / 重命名同步
-  - 应用已在运行时再次打开文件，会自动转到已运行的窗口（single-instance）
-- **Markdown 原生支持**：编辑 / 分屏 / 预览三种视图（marked + DOMPurify + highlight.js）
-  - GitHub 风格语法：标题、粗斜体、列表、任务列表、表格、引用、代码块（带语法高亮）、删除线、链接、图片等
-  - 预览中的外链点击后自动用系统浏览器打开
-- 工具栏一键插入 Markdown 语法（标题 / 粗体 / 斜体 / 删除线 / 引用 / 代码 / 列表 / 任务 / 链接 / 表格 / 分割线）
-- 明暗主题切换（记忆选择）
-- 侧边栏按标题搜索笔记与外部文件
-- 状态栏字数统计；分屏视图滚动位置同步
-- 关闭窗口时自动冲刷未保存内容（防抖期间不丢字）
-- 快捷键：
-  - `Ctrl+N` 新建 ｜ `Ctrl+O` 打开 Markdown 文件 ｜ `Ctrl+S` 立即保存
-  - `Ctrl+B` 粗体 ｜ `Ctrl+I` 斜体 ｜ `Ctrl+K` 插入链接
-  - `Ctrl+E` 编辑 ｜ `Ctrl+Shift+E` 分屏 ｜ `Ctrl+Shift+P` 预览
-  - `Esc` 关闭删除确认框
+**编辑与写作**
 
-## 数据存储
+- 编辑 / 分屏 / 预览三种视图（CodeMirror 6 编辑器 + marked + DOMPurify + 按需加载的代码高亮）
+- 输入自适应防抖自动保存（300ms–4s），关闭窗口自动冲刷未落盘内容，不丢一字
+- 标题（正文第一行）即文件名，改名自动同步磁盘文件；非法字符自动清理、重名自动加序号，绝不覆盖
+- 大纲导航、分屏滚动位置同步、状态栏字数统计
+- 粘贴 / 拖入图片自动保存为附件并插入引用
 
-每篇笔记一个 Markdown 文件（新建时由你选择保存位置与文件名），元信息统一索引：
+**版本历史（git 式）**
 
-```
-<应用数据目录>/
-└── index.json          # 笔记元信息（id、标题、创建/更新时间、文件路径）
-```
+- 显式「提交」生成版本快照，内容按内容寻址去重存储（相同内容只存一份），任意历史版本可一键恢复
+- 历史面板支持版本对比（行级 diff）
 
-笔记正文保存在各自独立的 `.md` 文件中，位置由新建时选择。
+**文件与搜索**
 
-**文件名与笔记名称保持一致**：标题（正文第一行或手动重命名）变化时，磁盘文件
-自动同步改名；标题中的非法字符（如 `:` `/` `*`）会被清理成空格，与已有文件
-重名时自动追加序号（如 `标题 (1).md`），绝不覆盖已有文件。
+- 打开外部 Markdown 文件：文件对话框（Ctrl+O）、拖拽、双击文件关联均可
+- 外部文件就地编辑保存、不纳入笔记索引；「另存为笔记」一键纳入管理
+- 侧边栏全文搜索（大小写不敏感，带缓存）
+- 「在文件夹中显示」快速定位文件
 
-应用数据目录由 Tauri 管理（Windows 为 `%APPDATA%\com.notebook.desktop`，
-macOS 为 `~/Library/Application Support/com.notebook.desktop`，Linux 为
-`~/.local/share/com.notebook.desktop`）。
+**外观与自定义**
+
+- 明暗主题 + 跟随系统；浅色主题下可切换配色方案（经典 / 樱花粉 / 雾蓝…）
+- 字号、字体（衬线 / 无衬线）、内容密度、行号等界面设置
+- 快捷键完全可自定义（冲突检测、一键重置）
+- 中英双语界面
+
+## 安装
+
+Windows 安装包（NSIS，`annal_<ver>_x64-setup.exe`）通过 `npm run tauri build` 生成，见下文「构建安装包」。
 
 ## 开发
 
-前置要求：[Node.js](https://nodejs.org) ≥ 18、[Rust](https://rustup.rs) 稳定版、
-Windows 需 [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)（Win11 自带）。
+前置要求：Node.js ≥ 18、Rust 稳定版、Windows 需 WebView2（Win11 自带）。
 
 ```bash
 npm install
-npm run tauri dev      # 启动开发模式（热更新）
+npm run tauri dev      # 开发模式（热更新，Vite 固定 1420 端口）
+```
+
+类型检查与测试：
+
+```bash
+npx tsc --noEmit       # 前端唯一门禁
+cargo test             # Rust 后端单元测试（src-tauri/）
 ```
 
 ## 构建安装包
 
 ```bash
 npm run tauri build
-# Windows 下生成 NSIS 安装向导（.exe）：
-#   src-tauri/target/release/bundle/nsis/notebook_0.1.0_x64-setup.exe
+# Windows 下生成 NSIS 安装向导：
+#   src-tauri/target/release/bundle/nsis/annal_<ver>_x64-setup.exe
 ```
 
-打包过程：`npm run build`（前端）→ cargo release 编译（Rust）→ tauri-bundler
-打安装包。首次打包会自动下载 NSIS 工具。
+打包流程：`npm run build`（前端）→ cargo release 编译（Rust）→ tauri-bundler 打安装包。
+安装包目前未签名，Windows SmartScreen 会提示「未知发布者」，选择「仍要运行」即可。
 
-其他说明：
+## 数据与存储
 
-- 需要 MSI 安装包时，把 `tauri.conf.json` 里 `bundle.targets` 改为
-  `["nsis", "msi"]`（MSI 需要 WiX 工具）。
-- 安装包目前未签名，Windows SmartScreen 会提示"未知发布者"，点"仍要运行"即可；
-  正式分发可申请代码签名证书（如 DigiCert / 沃通）。
-- 版本号改 `tauri.conf.json` 的 `version` 字段。
-- 文件关联（双击打开 .md）在安装时由 NSIS 写入注册表；
-  使用 `npm run tauri dev` 或直接运行 `target/release/notebook.exe 文件.md` 也可验证打开效果。
+- 每篇笔记一个独立的 `.md` 文件，保存位置由你选择
+- 元信息（id、标题、时间、路径）统一索引在 `index.json`，正文永远在明处
+- 版本历史存于 `versions/`（指针记录 + 内容寻址的 `blobs/`，大块自动压缩）
+- 图片附件存于 `attachments/`
+
+应用数据目录由系统管理（Windows：`%APPDATA%\com.annal.desktop`，
+macOS：`~/Library/Application Support/com.annal.desktop`，
+Linux：`~/.local/share/com.annal.desktop`）。
 
 ## 项目结构
 
 ```
-├── index.html            # 页面骨架（侧边栏 / 工具栏 / 编辑器 / 预览 / 状态栏）
-├── src/
-│   ├── main.ts           # 前端逻辑（列表/编辑器/自动保存/视图模式/工具栏动作）
-│   ├── markdown.ts       # Markdown 渲染（marked + DOMPurify + 代码高亮）
-│   └── styles.css        # 样式（明暗双主题 / Markdown 排版）
+├── index.html            # 页面骨架（标题栏 / 侧边栏 / 编辑器 / 预览 / 覆盖层）
+├── src/                  # 前端（无框架，信号驱动）
+│   ├── editor.ts         # CodeMirror 6 编辑器
+│   ├── markdownModel.ts  # 块级模型 + Markdown 渲染（增量解析）
+│   ├── virtualPreview.ts # 虚拟化预览
+│   ├── sidebar.ts        # 侧边栏（笔记 / 外部文件 / 搜索 / 多选）
+│   ├── outline.ts        # 大纲
+│   ├── i18n.ts           # 国际化（zh-CN / en-US）
+│   └── app/              # 组合根与应用协调器（保存 / 同步 / 设置 / 窗口）
 └── src-tauri/
-    ├── src/
-    │   ├── lib.rs        # Rust 后端：笔记 CRUD + 外链打开命令
-    │   └── main.rs
+    ├── src/lib.rs        # Rust 后端：笔记 CRUD + 版本历史 + 搜索 + 文件同步
     ├── tauri.conf.json   # 应用配置
-    └── capabilities/     # 权限声明
+    └── windows/          # NSIS 安装钩子
 ```
 
-## 后续规划（思路）
+## 开源协议
 
-- 全文搜索
+本项目基于 [GNU GPL v3](LICENSE) 发布（SPDX：`GPL-3.0-or-later`）。
+你可以自由使用、修改、分发本项目，但任何基于本项目的衍生作品必须同样以 GPL-3.0 协议开源。
+
+Copyright © 2026 yilv
+
+## 后续规划
+
 - 标签 / 文件夹
-- 多窗口 / 侧边栏折叠
+- 多窗口
+- 移动端同步

@@ -87,7 +87,7 @@ export function initSidebarResizer() {
       resizerEl.removeEventListener("pointermove", onMove);
       resizerEl.removeEventListener("pointerup", onUp);
       resizerEl.removeEventListener("pointercancel", onUp);
-      localStorage.setItem("notebook:sidebar-width", String(sidebarWidth.get()));
+      localStorage.setItem("annal:sidebar-width", String(sidebarWidth.get()));
     };
     resizerEl.addEventListener("pointermove", onMove);
     resizerEl.addEventListener("pointerup", onUp);
@@ -96,7 +96,7 @@ export function initSidebarResizer() {
 
   resizerEl.addEventListener("dblclick", () => {
     applySidebarWidth(SIDEBAR_DEFAULT_WIDTH);
-    localStorage.setItem("notebook:sidebar-width", String(SIDEBAR_DEFAULT_WIDTH));
+    localStorage.setItem("annal:sidebar-width", String(SIDEBAR_DEFAULT_WIDTH));
   });
 }
 
@@ -437,7 +437,7 @@ export function initSidebar(actions: SidebarActions) {
   sidebarHidden.subscribe((hidden) => {
     document.body.classList.toggle("sidebar-hidden", hidden);
     if (!hidden) document.body.classList.remove("sidebar-auto-hidden");
-    localStorage.setItem("notebook:sidebar", hidden ? "hidden" : "shown");
+    localStorage.setItem("annal:sidebar", hidden ? "hidden" : "shown");
   });
 
   sidebarCollapseBtn.addEventListener("click", () => setSidebarHidden(!sidebarHidden.get()));
@@ -510,7 +510,7 @@ export function initSidebar(actions: SidebarActions) {
   pageSizeSelect.addEventListener("change", () => {
     const next = Number(pageSizeSelect.value);
     if (!Number.isFinite(next) || next <= 0) return;
-    localStorage.setItem("notebook:list-page-size", String(next));
+    localStorage.setItem("annal:list-page-size", String(next));
     listPageSize.set(next);
     listPage.set(1);
   });

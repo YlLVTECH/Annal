@@ -15,14 +15,12 @@ import {
   runCommand,
   setLineNumbersEnabled,
   setStatus,
-  setViewMode,
 } from "../editor";
 import { initHistory } from "../history";
 import { openFindPanel } from "../findReplace";
 import { initI18n, applyI18nToDocument, t } from "../i18n";
 import { initOutline, refreshOutline } from "../outline";
-import { getPreview, initPipeline, openInEditor } from "../pipeline";
-import { initScrollSync } from "../documentPosition";
+import { initPipeline, openInEditor } from "../pipeline";
 import { initShortcuts } from "../shortcuts";
 import { initShortcutSettings } from "../shortcutSettings";
 import { initSidebar } from "../sidebar";
@@ -56,11 +54,10 @@ export async function bootstrapApp(): Promise<void> {
   initTheme();
   initDialogs();
 
-  // 2. 编辑管线（Editor -> Model -> Preview）及其消费者
+  // 2. 编辑管线（Editor -> Model）及其消费者
   initPipeline(refreshOutline);
-  setLineNumbersEnabled(localStorage.getItem("notebook:line-numbers") !== "0");
-  initScrollSync({ getEditorView, getPreview });
-  initOutline({ getEditorView, getPreview, flashHeading: flashHeadingAtLine });
+  setLineNumbersEnabled(localStorage.getItem("annal:line-numbers") !== "0");
+  initOutline({ getEditorView, flashHeading: flashHeadingAtLine });
 
   // 3. 设置、侧栏与工具
   applySettings();
@@ -90,8 +87,6 @@ export async function bootstrapApp(): Promise<void> {
   });
   initShortcutSettings();
 
-  const viewButtons = document.querySelectorAll<HTMLButtonElement>(".view-btn");
-  for (const b of viewButtons) b.addEventListener("click", () => setViewMode(b.dataset.mode));
   const toolButtons = document.querySelectorAll<HTMLButtonElement>(".tool-btn");
   for (const b of toolButtons) {
     b.addEventListener("click", () => runCommand(b.dataset.cmd ?? "", toggleTablePopover));

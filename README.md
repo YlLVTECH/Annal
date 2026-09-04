@@ -94,6 +94,13 @@ Linux：`~/.local/share/com.annal.desktop`）。
     └── windows/          # NSIS 安装钩子
 ```
 
+## 开源协议
+
+本项目基于 [GNU GPL v3](LICENSE) 发布（SPDX：`GPL-3.0-or-later`）。
+你可以自由使用、修改、分发本项目，但任何基于本项目的衍生作品必须同样以 GPL-3.0 协议开源。
+
+Copyright © 2026 yilv
+
 ## 后续规划
 
 - 标签 / 文件夹

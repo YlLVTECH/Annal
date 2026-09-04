@@ -94,6 +94,13 @@ Linux: `~/.local/share/com.annal.desktop`).
     └── windows/          # NSIS installer hooks
 ```
 
+## License
+
+This project is released under the [GNU GPL v3](LICENSE) (SPDX: `GPL-3.0-or-later`).
+You are free to use, modify and redistribute it, but any derivative work must be open-sourced under the same GPL-3.0 terms.
+
+Copyright © 2026 yilv
+
 ## Roadmap
 
 - Tags / folders

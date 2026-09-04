@@ -42,13 +42,6 @@ export interface FsSyncResult {
   exists: boolean[];
 }
 
-export type ViewMode = "edit" | "split" | "preview";
-
-export function parseViewMode(value: unknown): ViewMode {
-  if (value === "split" || value === "preview") return value;
-  return "edit";
-}
-
 export type ContentDensity = "standard" | "sparse" | "compact";
 
 /** 当前编辑对象：内部笔记 或 外部文件 */

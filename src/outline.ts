@@ -1,16 +1,14 @@
 // 大纲面板：从块模型提取标题，渲染为可点击的目录树。
 // - 标题数据直接取自 markdownModel 的顶层块（type === "heading"），行号随增量编辑自动维护，
 //   无需单独解析源码；ATX 与 setext 两种写法的标题都能识别。
-// - 点击条目跳转到对应源行：编辑/分屏模式滚编辑器并放置光标，预览模式滚预览区。
-// - 随编辑器/预览滚动高亮当前所在章节。
+// - 点击条目跳转到对应源行：滚动编辑器并放置光标。
+// - 随编辑器滚动高亮当前所在章节。
 // - 刷新由管线事件驱动（model:changed / doc:loaded / doc:closed），打字时 200ms 防抖合并。
 
 import type { EditorView } from "@codemirror/view";
 import { bus } from "./events";
-import { scrollToLine } from "./documentPosition";
 import { getBlocks, type MdBlock } from "./markdownModel";
-import { current, viewMode } from "./state";
-import type { PreviewApi } from "./virtualPreview";
+import { current } from "./state";
 
 interface OutlineEntry {
   /** 标题级别 1-6 */
@@ -25,7 +23,6 @@ interface OutlineEntry {
 
 export interface OutlineDeps {
   getEditorView: () => EditorView;
-  getPreview: () => PreviewApi;
   /** 点击跳转后闪烁高亮编辑器中的目标标题行 */
   flashHeading: (lineNo: number) => void;
 }
@@ -147,25 +144,34 @@ function render() {
 
 /* ---------- 跳转与当前章节高亮 ---------- */
 
+/** 跳转到指定源行：把该行行块顶端对齐视口顶部，放置光标（不打乱已滚到的位置） */
+function scrollToLine(lineFloat: number) {
+  const v = deps?.getEditorView();
+  if (!v || v.state.doc.lines === 0) return;
+  const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), hi);
+  const lineNo = clamp(Math.floor(lineFloat) + 1, 1, v.state.doc.lines);
+  const line = v.state.doc.line(lineNo);
+  const block = v.lineBlockAt(line.from);
+  const max = Math.max(0, v.scrollDOM.scrollHeight - v.scrollDOM.clientHeight);
+  v.scrollDOM.scrollTop = clamp(block.top, 0, max);
+  v.dispatch({ selection: { anchor: line.from }, scrollIntoView: false });
+  if (!v.hasFocus) v.focus();
+}
+
 function onItemClick(e: Event) {
   const li = (e.target as HTMLElement).closest<HTMLLIElement>(".outline-item");
   if (!li) return;
   const line = Number(li.dataset.line);
   if (!Number.isFinite(line)) return;
   scrollToLine(line);
-  // 预览模式闪烁高亮预览块；编辑/分屏只闪烁编辑器标题行
-  if (viewMode.get() === "preview") deps?.getPreview().flashAtLine(line);
-  else deps?.flashHeading(Math.floor(line) + 1);
+  deps?.flashHeading(Math.floor(line) + 1);
   updateActive();
 }
 
 /** 视口顶端对应的源行号（浮点，用于定位当前章节） */
 function viewportTopLine(): number {
-  if (!deps) return -1;
-  const v = deps.getEditorView();
-  const p = deps.getPreview();
-  if (viewMode.get() === "preview") return p.mapYToLine(p.element.scrollTop);
-  if (v.state.doc.lines === 0) return -1;
+  const v = deps?.getEditorView();
+  if (!v || v.state.doc.lines === 0) return -1;
   const docY = v.scrollDOM.scrollTop + 1;
   const block = v.lineBlockAtHeight(docY);
   return v.state.doc.lineAt(block.from).number - 1;
@@ -231,9 +237,7 @@ export function initOutline(outlineDeps: OutlineDeps) {
   if (current.get()) restoreOutlineTab();
 
   const ed = deps.getEditorView().scrollDOM;
-  const pv = deps.getPreview().element;
   ed.addEventListener("scroll", updateActive, { passive: true });
-  pv.addEventListener("scroll", updateActive, { passive: true });
   render();
 }
 

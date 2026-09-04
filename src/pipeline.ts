@@ -1,69 +1,29 @@
-// 编辑管线组合根：把「编辑器 -> 块模型 -> 虚拟预览」装配成同步单向数据流。
+// 编辑管线组合根：把「编辑器 -> 块模型」装配成同步单向数据流。
 //
-//   editor(CodeMirror) -> markdownModel.applyEdit -> virtualPreview.refresh / outline / save
+//   editor(CodeMirror) -> markdownModel.applyEdit -> outline / save
 //
-// 每键热路径使用显式依赖注入和同步函数调用，不经过通用事件总线；低频的打开、关闭、
-// 视图模式和布局失效仍使用 events.ts 解耦生命周期消费者。
+// 每键热路径使用显式依赖注入和同步函数调用，不经过通用事件总线；低频的打开、
+// 关闭等生命周期仍使用 events.ts 解耦消费者。
 
 import { bus } from "./events";
 import { closeEditor, getEditorView, initEditor, showEditor } from "./editor";
 import { notifyDocumentEdited } from "./app/save";
-import { notifyEditorActivity, scheduleResync } from "./documentPosition";
 import { applyEdit, loadModel, resetModel, setRenderBaseDir } from "./markdownModel";
-import { initVirtualPreview, type PreviewApi } from "./virtualPreview";
-import { viewMode } from "./state";
 import { dirOfPath } from "./utils";
 
-let preview: PreviewApi | null = null;
-
-/** 虚拟预览实例（滚动同步/大纲等模块经注入获取，避免反向依赖管线） */
-export function getPreview(): PreviewApi {
-  if (!preview) throw new Error("pipeline 尚未初始化");
-  return preview;
-}
-
 export function initPipeline(onModelChanged: () => void): void {
-  const previewEl = document.querySelector<HTMLElement>("#preview")!;
-  preview = initVirtualPreview(previewEl, () => scheduleResync());
-  initEditor(previewEl, {
+  initEditor({
     onDocEdited: (e) => {
-      // 每键热路径保持同步直连：Editor -> Model -> Preview/Outline/Save。
+      // 每键热路径保持同步直连：Editor -> Model -> Outline/Save。
       // 不经过通用事件总线，避免订阅查找与二次广播的固定开销。
-      notifyEditorActivity();
-      const changedIds = applyEdit(
+      applyEdit(
         getEditorView().state.doc,
         { start: e.start, end: e.end, endNew: e.endNew },
         { newlineChange: e.newlineChange },
       );
-      preview?.refresh(changedIds);
       onModelChanged();
       notifyDocumentEdited();
     },
-  });
-
-  // 打开/切换文档：模型已重载且块 id 从 1 重排，预览必须整体卸载旧块后重建
-  bus.on("doc:loaded", () => {
-    preview?.reset();
-    preview?.setVisible(viewMode.get() !== "edit");
-  });
-
-  // 关闭文档：清空预览并卸载
-  bus.on("doc:closed", () => {
-    preview?.setVisible(false);
-    preview?.refresh();
-  });
-
-  // 视图模式切换：预览可见性 + 内容刷新 + 分屏重同步
-  bus.on("view:mode", ({ mode }) => {
-    preview?.setVisible(mode !== "edit");
-    if (mode !== "edit") preview?.refresh();
-    scheduleResync();
-  });
-
-  // 布局失效（字号/密度/容器尺寸变化）：强制重排 + 重同步
-  bus.on("preview:invalidate", () => {
-    preview?.markLayoutDirty();
-    scheduleResync();
   });
 }
 

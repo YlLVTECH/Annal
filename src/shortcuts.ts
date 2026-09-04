@@ -1,5 +1,5 @@
 import { handleDialogEscape, isAnyDialogOpen } from "./dialogs";
-import { canEditCurrent, isComposing, runCommand, setViewMode } from "./editor";
+import { canEditCurrent, isComposing, runCommand } from "./editor";
 import { closeHistory, isHistoryCompareOn, isHistoryOpen, toggleCompare } from "./history";
 import { setSidebarHidden } from "./sidebar";
 import { sidebarHidden } from "./state";
@@ -13,9 +13,6 @@ export type CommandId =
   | "save"
   | "find"
   | "toggleSidebar"
-  | "viewEdit"
-  | "viewSplit"
-  | "viewPreview"
   | "bold"
   | "italic"
   | "link";
@@ -27,9 +24,6 @@ export const COMMAND_IDS: CommandId[] = [
   "save",
   "find",
   "toggleSidebar",
-  "viewEdit",
-  "viewSplit",
-  "viewPreview",
   "bold",
   "italic",
   "link",
@@ -67,9 +61,6 @@ export const DEFAULT_BINDINGS: Readonly<Record<CommandId, readonly Binding[]>> =
   save: [b("s", true)],
   find: [b("f", true)],
   toggleSidebar: [b("\\", true)],
-  viewEdit: [b("e", true)],
-  viewSplit: [b("e", true, true)],
-  viewPreview: [b("p", true, true)],
   bold: [b("b", true)],
   italic: [b("i", true)],
   link: [b("k", true)],
@@ -331,13 +322,6 @@ function execCommand(cmd: CommandId, e: KeyboardEvent, handlers: ShortcutHandler
     case "toggleSidebar":
       e.preventDefault();
       setSidebarHidden(!sidebarHidden.get());
-      return true;
-    case "viewEdit":
-    case "viewSplit":
-    case "viewPreview":
-      if (isComposing()) return false;
-      e.preventDefault();
-      setViewMode(cmd === "viewEdit" ? "edit" : cmd === "viewSplit" ? "split" : "preview");
       return true;
     case "bold":
     case "italic":

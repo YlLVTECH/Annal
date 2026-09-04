@@ -174,11 +174,6 @@
             </button>
           </div>
           </div>
-          <div class="toolbar-group" id="view-toggle" data-i18n-title="toolbar.view.toggle" title="视图模式">
-            <button class="view-btn active" data-mode="edit" data-i18n="toolbar.view.edit" data-i18n-title="toolbar.view.edit" title="编辑 (Ctrl+E)">编辑</button>
-            <button class="view-btn" data-mode="split" data-i18n="toolbar.view.split" data-i18n-title="toolbar.view.split" title="分屏 (Ctrl+Shift+E)">分屏</button>
-            <button class="view-btn" data-mode="preview" data-i18n="toolbar.view.preview" data-i18n-title="toolbar.view.preview" title="预览 (Ctrl+Shift+P)">预览</button>
-          </div>
         </div>
 
         <!-- 智能表格插入弹层（锚定在表格按钮下方） -->
@@ -204,12 +199,10 @@
         </div>
 
         <div id="editor-main">
-          <div id="editor-body" class="mode-edit" hidden>
+          <div id="editor-body" hidden>
             <div id="editor-wrap">
               <div id="editor" class="editor-mount"></div>
             </div>
-            <div id="split-resizer" data-i18n-title="editor.splitRatio.title" title="拖拽调整分屏比例，双击恢复默认"></div>
-            <div id="preview" class="markdown-body"></div>
           </div>
         </div>
         <div id="editor-empty">
@@ -333,17 +326,6 @@
               </div>
               <div class="settings-row">
                 <div class="settings-row-main">
-                  <span class="settings-label" data-i18n="settings.defaultView">默认视图</span>
-                  <span class="settings-desc" data-i18n="settings.defaultView.desc">新建或打开笔记后的初始视图模式</span>
-                </div>
-                <select id="setting-view" class="settings-select">
-                  <option value="edit" data-i18n="settings.view.edit">编辑</option>
-                  <option value="split" data-i18n="settings.view.split">分屏</option>
-                  <option value="preview" data-i18n="settings.view.preview">预览</option>
-                </select>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-main">
                   <span class="settings-label" data-i18n="settings.contentDensity">内容密度</span>
                   <span class="settings-desc" data-i18n="settings.contentDensity.desc">调节编辑与预览区域的留白和排版间距</span>
                 </div>
@@ -414,6 +396,16 @@
                 </div>
                 <label class="switch">
                   <input id="setting-line-numbers" type="checkbox" checked />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-main">
+                  <span class="settings-label" data-i18n="settings.liveRender">即时渲染</span>
+                  <span class="settings-desc" data-i18n="settings.liveRender.desc">编辑器内直接呈现 Markdown 样式，光标触及处显示源码</span>
+                </div>
+                <label class="switch">
+                  <input id="setting-live-render" type="checkbox" checked />
                   <span class="switch-track" aria-hidden="true"></span>
                 </label>
               </div>

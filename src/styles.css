@@ -71,6 +71,7 @@
   --hl-add-bg: #f0fff4;
   --hl-del: #b31d28;
   --hl-del-bg: #ffeef0;
+
 }
 
 /* 界面字体切换（设置 -> 外观）：无衬线覆盖 --font-ui */
@@ -132,6 +133,7 @@ html[data-theme="dark"] {
   --hl-add-bg: #033a16;
   --hl-del: #ffdcd7;
   --hl-del-bg: #67060c;
+
 }
 
 /* ============ 配色方案（仅浅色主题生效，由 html[data-palette] 驱动） ============ */
@@ -1158,56 +1160,12 @@ body.sidebar-auto-hidden #editor-header {
   font-family: inherit;
 }
 
-/* 视图切换（分段控件） */
-#view-toggle {
-  flex-shrink: 0; /* 永远留在首行右侧 */
-  background: var(--bg-tool-group);
-  border-radius: var(--radius-sm);
-  padding: 2px;
-  gap: 2px;
-  transition: background-color 0.18s ease;
-}
-
-.view-btn {
-  height: 24px;
-  padding: 0 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-.view-btn:hover {
-  color: var(--text);
-}
-
-.view-btn.active {
-  background: var(--bg-tool-active);
-  color: var(--text);
-  font-weight: 500;
-}
-
-/* ---------- 编辑区 / 预览区 ---------- */
+/* ---------- 编辑区 ---------- */
 #editor-body {
   flex: 1;
   display: flex;
   min-height: 0;
   overflow: hidden;
-}
-
-#editor-body.mode-edit #preview {
-  display: none;
-}
-
-#editor-body.mode-preview #editor-wrap {
-  display: none;
-}
-
-#editor-body.mode-split #editor {
-  border-right: 1px solid var(--border-soft);
 }
 
 #editor-wrap {
@@ -1217,8 +1175,7 @@ body.sidebar-auto-hidden #editor-header {
   display: flex;
 }
 
-#editor,
-#preview {
+#editor {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -1230,27 +1187,6 @@ body.sidebar-auto-hidden #editor-header {
   display: flex;
   flex-direction: column;
 }
-
-#editor-body.mode-split {
-  --split-gap: 5px;
-}
-
-#editor-body.mode-split #editor-wrap {
-  flex: 0 0 50%;
-  min-height: 0;
-}
-
-#editor-body.mode-split #preview {
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-/* 仅在分屏模式显示分割条 */
-#editor-body:not(.mode-split) #split-resizer {
-  display: none;
-}
-
-/* 分屏空笔记时的编辑区提示由 CodeMirror 的 placeholder 扩展提供（详见 editor.ts） */
 
 /* ---------- 大纲面板（侧栏内嵌面板） ---------- */
 #editor-main {
@@ -1324,9 +1260,6 @@ body.sidebar-auto-hidden #editor-header {
   --content-pad-y: 28px;
   --content-pad-bottom: 120px;
   --editor-line-height: 1.8;
-  --markdown-line-height: 1.75;
-  --markdown-block-space: 0.7em;
-  --markdown-heading-space: 1.3em;
 }
 
 :root[data-content-density="sparse"] {
@@ -1334,9 +1267,6 @@ body.sidebar-auto-hidden #editor-header {
   --content-pad-y: 38px;
   --content-pad-bottom: 150px;
   --editor-line-height: 2;
-  --markdown-line-height: 1.9;
-  --markdown-block-space: 0.9em;
-  --markdown-heading-space: 1.55em;
 }
 
 :root[data-content-density="compact"] {
@@ -1344,9 +1274,6 @@ body.sidebar-auto-hidden #editor-header {
   --content-pad-y: 18px;
   --content-pad-bottom: 80px;
   --editor-line-height: 1.58;
-  --markdown-line-height: 1.58;
-  --markdown-block-space: 0.48em;
-  --markdown-heading-space: 1em;
 }
 
 /* ---------- CodeMirror 6 编辑器 ---------- */
@@ -1584,20 +1511,6 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 /* 大纲跳转：预览区目标块短暂高亮后淡出（类由 virtualPreview.ts 定时移除） */
-@keyframes preview-flash {
-  0%, 35% {
-    background-color: var(--accent-soft);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
-#preview .pv-block.pv-flash {
-  border-radius: var(--radius-sm);
-  animation: preview-flash 1.2s ease forwards;
-}
-
 /* 深色模式：面板底色更贴近 VSCode 暗色 */
 [data-theme="dark"] #editor .cm-editor .fr-widget {
   background: #252527;
@@ -1614,86 +1527,7 @@ body.sidebar-auto-hidden #editor-header {
   box-shadow: 0 0 0 2px var(--danger-soft);
 }
 
-#preview {
-  position: relative;
-  padding: var(--content-pad-y) var(--content-pad-x) var(--content-pad-bottom);
-  font-size: var(--editor-font-size, 15.5px);
-  line-height: var(--markdown-line-height);
-  transition: color 0.18s ease;
-}
-
-#editor-body.mode-split #editor .cm-content,
-#editor-body.mode-split #preview {
-  padding-left: clamp(14px, 2.8vw, 42px);
-  padding-right: clamp(14px, 2.8vw, 42px);
-}
-
-/* ---------- 分屏分割条 ---------- */
-#split-resizer {
-  width: 5px;
-  flex-shrink: 0;
-  cursor: col-resize;
-  z-index: 6;
-  transition: background-color 0.15s ease;
-}
-
-#split-resizer:hover,
-body.resizing #split-resizer {
-  background: var(--accent-soft);
-}
-
-/* 拖拽期间：禁止选中 */
-body.resizing {
-  user-select: none;
-}
-
-body.resizing #editor-wrap,
-body.resizing #preview {
-  transition: none;
-}
-
-/* 中窄屏：分屏改为上下堆叠，避免并排过窄 */
-@media (max-width: 720px) {
-  #editor-body.mode-split {
-    flex-direction: column;
-  }
-
-  #editor-body.mode-split #editor {
-    border-right: none;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  #editor-body.mode-split #editor .cm-content,
-  #editor-body.mode-split #preview {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  #preview.markdown-body {
-    font-size: var(--editor-font-size, 15.5px);
-    line-height: var(--markdown-line-height);
-  }
-
-  #editor-body.mode-split #editor-wrap {
-    flex: 0 0 50%;
-    max-height: none;
-    min-height: 0;
-  }
-
-  #editor-body.mode-split #preview {
-    flex: 1 1 0;
-    max-height: none;
-    min-height: 0;
-  }
-
-  #split-resizer {
-    width: auto;
-    height: 5px;
-    cursor: row-resize;
-  }
-}
-
-/* 极窄屏：继续收紧编辑/预览区内边距 */
+/* 极窄屏：收紧编辑区内边距 */
 @media (max-width: 480px) {
   #editor .cm-content {
     padding-left: 12px;
@@ -1702,12 +1536,6 @@ body.resizing #preview {
     padding-bottom: 80px;
   }
 
-  #preview {
-    padding-left: 12px;
-    padding-right: 12px;
-    padding-top: 18px;
-    padding-bottom: 80px;
-  }
 }
 
 /* ---------- 空状态 ---------- */
@@ -1830,11 +1658,6 @@ body.resizing #preview {
   word-break: break-word;
 }
 
-#preview.markdown-body {
-  font-size: var(--editor-font-size, 15.5px);
-  line-height: var(--markdown-line-height);
-}
-
 .markdown-body > *:first-child {
   margin-top: 0 !important;
 }
@@ -1883,22 +1706,6 @@ body.resizing #preview {
 .markdown-body ul,
 .markdown-body ol {
   margin: 0.7em 0;
-}
-
-#preview h1,
-#preview h2,
-#preview h3,
-#preview h4,
-#preview h5,
-#preview h6 {
-  margin-top: var(--markdown-heading-space);
-}
-
-#preview p,
-#preview ul,
-#preview ol {
-  margin-top: var(--markdown-block-space);
-  margin-bottom: var(--markdown-block-space);
 }
 
 .markdown-body ul,
@@ -3542,10 +3349,6 @@ body.resizing #preview {
     min-width: 27px;
     padding: 0 5px;
   }
-
-  .view-btn {
-    padding: 0 9px;
-  }
 }
 
 /* 窄窗口：侧栏变为悬浮抽屉（盖在编辑区上方），编辑区占满宽度 */
@@ -3640,14 +3443,7 @@ body.resizing #preview {
     height: 14px;
   }
 
-  .view-btn {
-    height: 22px;
-    padding: 0 8px;
-    font-size: 11.5px;
-  }
-
-  #editor,
-  #preview {
+  #editor {
     padding-left: 16px;
     padding-right: 16px;
   }
@@ -3701,12 +3497,6 @@ body.resizing #preview {
     height: 13px;
   }
 
-  .view-btn {
-    height: 20px;
-    padding: 0 6px;
-    font-size: 11px;
-  }
-
   #sidebar-expand {
     top: calc(var(--titlebar-h) + 6px);
     left: 8px;
@@ -3714,8 +3504,7 @@ body.resizing #preview {
     height: 26px;
   }
 
-  #editor,
-  #preview {
+  #editor {
     padding-left: 12px;
     padding-right: 12px;
     padding-top: 16px;
@@ -3855,37 +3644,142 @@ body.resizing #preview {
     height: calc(100vh - 40px);
   }
 
-  #editor,
-  #preview {
+  #editor {
     padding-bottom: 60px;
   }
 }
 
-/* ============ 虚拟化预览（块级） ============ */
-/* 撑层：占位总高度，块在其内部绝对定位（内容坐标 0 即第一个块顶边） */
-#preview .pv-spacer {
-  position: relative;
+/* ============ 即时渲染（Live Preview） ============ */
+/* liveRender.ts 的装饰类：标题/引用/代码块/表格为行级装饰，
+   强调/链接/代码为 mark 装饰；主题色全部走 CSS 变量，深浅色与配色方案自动适配。 */
+
+/* 源码符号（光标触及节点时显示）：淡化，不与内容争抢注意力 */
+#editor .cm-editor .cm-md-mark {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* 标题：字号随 --editor-font-size 缩放，行高用相对值避免标题行过于稀疏 */
+#editor .cm-editor .cm-line.cm-md-h1 {
+  font-size: 1.7em;
+  font-weight: 700;
+  line-height: 1.35;
+  padding-top: 0.3em;
+}
+#editor .cm-editor .cm-line.cm-md-h2 {
+  font-size: 1.45em;
+  font-weight: 650;
+  line-height: 1.4;
+  padding-top: 0.28em;
+}
+#editor .cm-editor .cm-line.cm-md-h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  line-height: 1.45;
+  padding-top: 0.25em;
+}
+#editor .cm-editor .cm-line.cm-md-h4 {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.55;
+  padding-top: 0.2em;
+}
+#editor .cm-editor .cm-line.cm-md-h5,
+#editor .cm-editor .cm-line.cm-md-h6 {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.7;
+  padding-top: 0.15em;
+}
+#editor .cm-editor .cm-line.cm-md-h6 {
+  color: var(--text-muted);
+}
+
+/* 引用块 */
+#editor .cm-editor .cm-line.cm-md-quote {
+  color: var(--text-muted);
+  background: var(--bg-quote);
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+
+/* 围栏代码块：等宽字体 + 代码底色，首末行圆角呼应预览的 pre 圆角 */
+#editor .cm-editor .cm-line.cm-md-codeblock {
+  background: var(--bg-code);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+#editor .cm-editor .cm-line.cm-md-codeblock.cm-md-codeblock-start {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  padding-top: 6px;
+}
+#editor .cm-editor .cm-line.cm-md-codeblock-end {
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding-bottom: 6px;
+}
+
+/* 表格（源码形态）：表头加粗，分隔行淡化 */
+#editor .cm-editor .cm-line.cm-md-table-head {
+  font-weight: 600;
+}
+#editor .cm-editor .cm-line.cm-md-table-delim {
+  color: var(--text-faint);
+}
+
+/* 行内样式 */
+#editor .cm-editor .cm-md-strong {
+  font-weight: 700;
+}
+#editor .cm-editor .cm-md-em {
+  font-style: italic;
+}
+#editor .cm-editor .cm-md-strike {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--text-faint);
+}
+#editor .cm-editor .cm-md-code-inline {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-code);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+#editor .cm-editor .cm-md-link {
+  color: var(--link);
+}
+#editor .cm-editor .cm-md-task-done {
+  color: var(--success);
+}
+
+/* 内联图片（ImageWidget）与加载失败回退 */
+#editor .cm-editor .cm-md-image-wrap {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+#editor .cm-editor .cm-md-image {
+  display: block;
+  max-width: 100%;
+  max-height: 340px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-code);
+}
+#editor .cm-editor .cm-md-image-broken {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+
+/* 分隔线（HrWidget） */
+#editor .cm-editor .cm-md-hr {
+  display: inline-block;
   width: 100%;
-}
-
-/* 块级渲染：display:flow-root 阻止子元素 margin 塌陷，
-   使 offsetHeight 精确包含块内间距（布局高度即真实高度） */
-#preview .pv-block {
-  position: absolute;
-  left: 0;
-  right: 0;
-  display: flow-root;
-  box-sizing: border-box;
-  word-break: break-word;
-}
-
-/* 文档首个块不额外产生顶距（与旧整篇渲染一致） */
-#preview .pv-block:first-child :first-child {
-  margin-top: 0;
-}
-
-/* 含图片且尚无宽高比信息的块：为图片预留占位高度，避免加载时跳跃 */
-#preview .pv-block.img-placeholder img {
-  min-height: 140px;
-  object-fit: contain;
+  vertical-align: middle;
+  border-top: 1px solid var(--border);
 }

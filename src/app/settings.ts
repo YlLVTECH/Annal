@@ -6,12 +6,11 @@ import {
   switchSettingsCategory,
   syncSettingsUI,
 } from "../dialogs";
-import { setLineNumbersEnabled, setViewMode } from "../editor";
+import { setLineNumbersEnabled, setLiveRenderEnabled } from "../editor";
 import { bus } from "../events";
 import { refreshFindReplaceI18n } from "../findReplace";
 import { applyI18nToDocument, setLocale } from "../i18n";
 import { contentDensity, sidebarWidth } from "../state";
-import { parseViewMode } from "../types";
 import { readContentDensity } from "../utils";
 import { applyPalette, applyTheme, getSystemTheme, PALETTE_OPTIONS } from "./theme";
 
@@ -38,8 +37,6 @@ export function applySettings() {
   applyTheme(resolvedTheme);
   applyPalette(localStorage.getItem("annal:palette") || "classic");
 
-  setViewMode(parseViewMode(localStorage.getItem("annal:view")));
-
   const fontSize = localStorage.getItem("annal:font-size") || "15.5";
   document.documentElement.style.setProperty("--editor-font-size", `${fontSize}px`);
 
@@ -54,6 +51,7 @@ export function applySettings() {
   sidebarWidth.set(Math.min(Math.max(width, 210), 460));
 
   setLineNumbersEnabled(localStorage.getItem("annal:line-numbers") !== "0");
+  setLiveRenderEnabled(localStorage.getItem("annal:live-render") !== "0");
 }
 
 /** 构建"配色方案"色板选项（按钮内容含 data-i18n，构建后需跑一次 applyI18nToDocument） */
@@ -115,16 +113,13 @@ export function initSettings() {
     applySettings();
   });
   buildPaletteOptions(document.getElementById("setting-palette"));
-  settingsEls.view.addEventListener("change", () => setViewMode(settingsEls.view.value));
   settingsEls.contentDensity.addEventListener("change", () => {
     localStorage.setItem("annal:content-density", settingsEls.contentDensity.value);
     applySettings();
-    bus.emit("preview:invalidate", undefined);
   });
   settingsEls.fontSize.addEventListener("change", () => {
     localStorage.setItem("annal:font-size", settingsEls.fontSize.value);
     applySettings();
-    bus.emit("preview:invalidate", undefined);
   });
   settingsEls.fontFamily.addEventListener("change", () => {
     localStorage.setItem("annal:font-family", settingsEls.fontFamily.value);
@@ -145,6 +140,10 @@ export function initSettings() {
   settingsEls.lineNumbers.addEventListener("change", () => {
     localStorage.setItem("annal:line-numbers", settingsEls.lineNumbers.checked ? "1" : "0");
     setLineNumbersEnabled(settingsEls.lineNumbers.checked);
+  });
+  settingsEls.liveRender.addEventListener("change", () => {
+    localStorage.setItem("annal:live-render", settingsEls.liveRender.checked ? "1" : "0");
+    setLiveRenderEnabled(settingsEls.liveRender.checked);
   });
   settingsEls.language.addEventListener("change", async () => {
     await setLocale(settingsEls.language.value);

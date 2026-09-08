@@ -30,7 +30,7 @@ if (!body) {
 }
 
 const footer = [
-  `> 安装包：\`annal_${version}_x64-setup.exe\`（Windows 10/11 x64，NSIS，未签名）。`,
+  `> 安装包：\`Annal_${version}_x64-setup.exe\`（Windows 10/11 x64，NSIS，未签名）。`,
   "> 由 GitHub Actions 在 windows-latest 上自动构建，版本号取自 `package.json`。",
 ].join("\n");
 

@@ -52,7 +52,7 @@
 
 ## 📥 安装
 
-从 [Releases](https://github.com/YlLVTECH/Annal/releases/latest) 下载 `annal_<版本>_x64-setup.exe`（Windows 10/11 x64），双击安装即可。
+从 [Releases](https://github.com/YlLVTECH/Annal/releases/latest) 下载 `Annal_<版本>_x64-setup.exe`（Windows 10/11 x64），双击安装即可。
 
 > 安装包目前未签名，Windows SmartScreen 会提示「未知发布者」——选择「更多信息 → 仍要运行」。
 
@@ -77,7 +77,7 @@ cargo test             # Rust 后端单元测试（src-tauri/）
 ```bash
 npm run tauri build
 # Windows 下生成 NSIS 安装向导：
-#   src-tauri/target/release/bundle/nsis/annal_<ver>_x64-setup.exe
+#   src-tauri/target/release/bundle/nsis/Annal_<ver>_x64-setup.exe
 ```
 
 打包流程：`npm run build`（前端）→ cargo release 编译（Rust）→ tauri-bundler 打安装包。

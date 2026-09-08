@@ -52,7 +52,7 @@ Fully local-first: each note is a standalone `.md` file stored wherever you choo
 
 ## 📥 Installation
 
-Download `annal_<version>_x64-setup.exe` (Windows 10/11 x64) from [Releases](https://github.com/YlLVTECH/Annal/releases/latest) and run the installer.
+Download `Annal_<version>_x64-setup.exe` (Windows 10/11 x64) from [Releases](https://github.com/YlLVTECH/Annal/releases/latest) and run the installer.
 
 > The installer is currently unsigned, so Windows SmartScreen may warn about an "unknown publisher" — choose "More info → Run anyway".
 
@@ -77,7 +77,7 @@ cargo test             # Rust backend unit tests (src-tauri/)
 ```bash
 npm run tauri build
 # On Windows this produces the NSIS installer:
-#   src-tauri/target/release/bundle/nsis/annal_<ver>_x64-setup.exe
+#   src-tauri/target/release/bundle/nsis/Annal_<ver>_x64-setup.exe
 ```
 
 Build pipeline: `npm run build` (frontend) → cargo release compile (Rust) → tauri-bundler packages the installer.

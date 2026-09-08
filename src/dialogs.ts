@@ -303,9 +303,9 @@ export function syncSettingsUI() {
     els.language.appendChild(opt);
   }
 
-  // 填充版本号（与 tauri.conf.json / Cargo.toml 保持一致）
+  // 版本号经 vite define 注入（单一来源 package.json），勿在此硬编码
   if (settingsVersionEl) {
-    settingsVersionEl.textContent = "v0.3.0";
+    settingsVersionEl.textContent = `v${__APP_VERSION__}`;
   }
 
   return els;

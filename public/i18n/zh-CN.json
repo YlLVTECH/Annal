@@ -109,7 +109,6 @@
   "settings.language": "语言",
   "settings.language.desc": "界面显示语言，重启后生效",
   "settings.appName": "Annal",
-  "settings.version": "v0.3.0",
   "settings.feedback": "反馈 Bug",
   "settings.feedback.desc": "遇到问题或建议？欢迎提交反馈",
   "settings.feedback.btn": "提交反馈",

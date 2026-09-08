@@ -1,9 +1,12 @@
 import { defineConfig, type Plugin } from "vite";
-import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+
+// 版本号单一来源 package.json，注入 __APP_VERSION__ 供设置页展示
+const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string };
 
 /** dev/build 启动时把 src/i18n（唯一主本）同步到 public/i18n，防止两份手工镜像漂移 */
 function syncI18nAssets(): Plugin {
@@ -21,6 +24,9 @@ function syncI18nAssets(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [syncI18nAssets()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   clearScreen: false,
   server: {
     port: 1420,

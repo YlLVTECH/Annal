@@ -84,11 +84,11 @@ Build pipeline: `npm run build` (frontend) → cargo release compile (Rust) → 
 
 ## 🏷 Release Process
 
-The version in `package.json` is the single source of truth; npm lifecycle hooks sync it into `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock` automatically:
+The version in `package.json` is the single source of truth; npm lifecycle hooks sync it into `package-lock.json`, `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock` automatically:
 
 ```bash
 git pull               # keep the worktree clean first (npm version requires it)
-npm version patch      # or minor / major: syncs the three manifests and creates a v<version> tag
+npm version patch      # or minor / major: syncs the manifests and creates a v<version> tag
 git push --follow-tags # the tag triggers GitHub Actions to build the NSIS installer and publish a Release
 ```
 

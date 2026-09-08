@@ -1,6 +1,6 @@
-// 版本号单一来源是 package.json，本脚本把它同步到 Tauri 侧清单。
+// 版本号单一来源是 package.json，本脚本把它同步到其余清单。
 // 用法：node scripts/sync-version.mjs [--check]
-//   默认     将三处清单改写为 package.json 的版本
+//   默认     将各处清单改写为 package.json 的版本
 //   --check  只校验是否一致，不一致则退出码 1（npm preversion 钩子使用）
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -8,6 +8,11 @@ const checkOnly = process.argv.includes("--check");
 const { version } = JSON.parse(readFileSync("package.json", "utf-8"));
 
 const targets = [
+  {
+    // 根级 version（package-lock.json 顶层第一个 "version" 就是它）
+    file: "package-lock.json",
+    pattern: /(^[\s\S]*?"version"\s*:\s*)"([^"]*)"/,
+  },
   {
     file: "src-tauri/tauri.conf.json",
     pattern: /(^[\s\S]*?"version"\s*:\s*)"([^"]*)"/,

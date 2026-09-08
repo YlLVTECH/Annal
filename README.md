@@ -84,11 +84,11 @@ npm run tauri build
 
 ## 🏷 版本发布
 
-版本号以 `package.json` 为单一来源，通过 npm 生命周期钩子自动同步到 `src-tauri/tauri.conf.json`、`Cargo.toml`、`Cargo.lock`：
+版本号以 `package.json` 为单一来源，通过 npm 生命周期钩子自动同步到 `package-lock.json`、`src-tauri/tauri.conf.json`、`Cargo.toml`、`Cargo.lock`：
 
 ```bash
 git pull               # 先保持工作区干净（npm version 要求无未提交改动）
-npm version patch      # 或 minor / major：自动同步三处清单并创建 v<版本> 标签
+npm version patch      # 或 minor / major：自动同步各处清单并创建 v<版本> 标签
 git push --follow-tags # 标签推送后，GitHub Actions 自动构建 NSIS 包并发布 Release
 ```
 

@@ -19,6 +19,24 @@ let lastWatchKey = "";
 let pollRunning = false;
 let pollQueued = false;
 const renameHints = new Set<string>();
+/** 上次信号触发轮询时的路径集合签名：自动保存只改内容/时间戳，路径集合不变则跳过 */
+let lastPathsKey = "";
+
+/** 笔记与打开文件的路径集合签名（去重、小写、排序） */
+function currentPathsKey(): string {
+  const paths = [...notes.get().map((n) => n.path), ...openFiles.get().map((f) => f.path)].filter(Boolean);
+  return [...new Set(paths.map(pathKey))].sort().join("|");
+}
+
+/** 信号驱动的轮询入口：路径集合变化才发起全量轮询（新建/删除/改名/开关文件）。
+ *  每次自动保存都会 notes.set（updatedAt 变化），不过滤就会对全部笔记做一次
+ *  存在性 stat，笔记数量多时保存链路被无谓放大。 */
+function pollOnSignalChange(): void {
+  const key = currentPathsKey();
+  if (key === lastPathsKey) return;
+  lastPathsKey = key;
+  void pollFileStates();
+}
 
 /** 目录集合变化时同步 notify 监听（路径集相同则跳过，不发起 IPC） */
 function syncWatchPaths(paths: string[]) {
@@ -99,7 +117,8 @@ export function initFileSyncCoordinator(): void {
     if (!document.hidden) void pollFileStates();
   });
 
-  // 路径集合变化即同步 watcher（poll 内用签名去重 IPC）
-  notes.subscribe(() => void pollFileStates());
-  openFiles.subscribe(() => void pollFileStates());
+  // 路径集合变化即同步 watcher 并全量轮询（纯保存更新被签名过滤跳过）
+  lastPathsKey = currentPathsKey();
+  notes.subscribe(pollOnSignalChange);
+  openFiles.subscribe(pollOnSignalChange);
 }

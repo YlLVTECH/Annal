@@ -1,19 +1,37 @@
 // 即时渲染（Live Preview）扩展：基于 Lezer Markdown 语法树，在编辑器内直接渲染样式。
 // 行为对标 Typora / Obsidian 实时预览：
-// - 标题、引用、列表、围栏代码块、表格等以行级装饰直接呈现版式；
+// - 标题、引用、列表、围栏代码块、表格（源码形态）等以行级装饰直接呈现版式；
 // - 行内语法（**粗体**、*斜体*、~~删除线~~、`代码`、[链接](url)）在光标离开时
 //   隐藏源码符号、渲染内容样式；光标（选区）触及该节点时回退为源码显示；
 // - ![图片](path) 光标离开时渲染为内联图片（复用预览的 asset 协议解析）；
+// - 表格光标离开时整块替换为渲染后的 HTML 表格（TableWidget），触及回退源码；
 // - 分隔线光标离开时渲染为水平线。
 //
 // 性能与热路径约束：
 // - 只为可见视口构建装饰，滚动/输入/移动光标时按视口重算，不引入 O(全文) 工作；
 // - 语法树由编辑器已启用的 markdown() 语言增量维护（打字时 Lezer 只重解析受影响块）；
-// - 本模块只读文档与选区，不触碰块模型/预览（与单向数据流互不干扰）；
+// - 装饰拆成三部分（见下），只重算受本次更新影响的那部分；
 // - 隐藏符号的 replace 装饰同时注册为 atomicRanges，方向键会自然跳过不可见符号。
+//
+// 装饰的划分依据是"是否依赖选区"以及"是否为块级装饰"：
+// - 静态组（LiveRenderStatic）：行类（标题/引用/代码块/表格）与永远可见的源码符号
+//   淡化标记（列表符号、引用前缀、围栏标记等）——只在文档/视口/语法树变化时重建；
+// - 选区组（LiveRenderSel）：光标触及即回退源码的隐藏符号、图片与水平线 widget——
+//   光标移动（selectionSet）时只重建这一组，静态组保持不动；
+// - 表格块装饰（LiveRenderTables + tableDecoField）：块级替换装饰**不允许由插件提供**
+//   （@codemirror/view 的 TileUpdate.emit 对动态装饰源抛
+//   "Block decorations may not be specified via plugins"，只有 state field /
+//   静态 facet 值才允许），因此插件只负责算视口内的表格区间，经 effect 写回
+//   state field，由字段通过 EditorView.decorations.from 提供给视图。
 
 import { syntaxTree } from "@codemirror/language";
-import type { Extension } from "@codemirror/state";
+import {
+  StateEffect,
+  StateField,
+  type Extension,
+  type Range,
+  type Text,
+} from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -23,7 +41,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { SyntaxNodeRef } from "@lezer/common";
-import { getRenderBaseDir, resolveImgSrc } from "./markdownModel";
+import { getRenderBaseDir, renderSnippetHtml, resolveImgSrc } from "./markdownModel";
 
 /* ---------- 装饰工具 ---------- */
 
@@ -40,12 +58,6 @@ function mark(cls: string): Decoration {
     markCache.set(cls, deco);
   }
   return deco;
-}
-
-interface Part {
-  from: number;
-  to: number;
-  deco: Decoration;
 }
 
 interface Span {
@@ -122,9 +134,124 @@ class HrWidget extends WidgetType {
   }
 }
 
-/* ---------- 装饰构建 ---------- */
+/** 表格 widget：光标离开表格时把整块源码替换为渲染后的 HTML 表格。
+ *  渲染复用预览管线（marked + DOMPurify），单元格内的行内语法一并呈现；
+ *  点击 widget 会映射到表格边界、选区触及后回退源码进入编辑。 */
+class TableWidget extends WidgetType {
+  constructor(
+    readonly source: string,
+    readonly baseDir: string,
+  ) {
+    super();
+  }
 
-class LiveRenderPlugin {
+  override eq(other: TableWidget): boolean {
+    return other.source === this.source && other.baseDir === this.baseDir;
+  }
+
+  override toDOM(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-md-table-rendered markdown-body";
+    wrap.innerHTML = renderSnippetHtml(this.source, this.baseDir);
+    return wrap;
+  }
+
+  override ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+/* ---------- 表格块装饰：state field 承载 + 插件算视口 ---------- */
+
+/** 表格节点 → 行对齐的替换区间（块装饰必须整行覆盖，否则渲染错乱） */
+function tableBlockRange(doc: Text, node: SyntaxNodeRef): Span | null {
+  const from = doc.lineAt(node.from).from;
+  const endLine = doc.lineAt(node.to);
+  // node.to 正好落在下一行行首时，区间应收在上一行行尾
+  const to = endLine.from === node.to && node.to > from ? doc.lineAt(node.to - 1).to : endLine.to;
+  return to > from ? { from, to } : null;
+}
+
+/** 装饰区间是否严格覆盖整行（映射后的旧装饰可能因跨行编辑而错位） */
+function isLineAligned(doc: Text, from: number, to: number): boolean {
+  return doc.lineAt(from).from === from && doc.lineAt(to).to === to;
+}
+
+/** 插件算出的表格装饰写回字段用的事务效果 */
+const setTableDecos = StateEffect.define<DecorationSet>();
+
+/** 表格块装饰字段：块装饰只能由 state field（静态装饰源）提供，见文件头说明。
+ *  文档变更时先把旧装饰映射到新位置，再等插件按视口重算覆盖。 */
+const tableDecoField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decos, tr) {
+    if (tr.docChanged) {
+      decos = decos
+        .map(tr.changes)
+        .update({ filter: (from, to) => isLineAligned(tr.state.doc, from, to) });
+    }
+    for (const effect of tr.effects) {
+      if (effect.is(setTableDecos)) decos = effect.value;
+    }
+    return decos;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/** 两份表格装饰是否等价：避免每次光标移动/滚动都派发无意义的事务 */
+function sameTableDecos(a: DecorationSet, b: DecorationSet): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  const ai = a.iter();
+  const bi = b.iter();
+  for (;;) {
+    const av = ai.value;
+    const bv = bi.value;
+    if (!av || !bv) return !av && !bv;
+    if (ai.from !== bi.from || ai.to !== bi.to) return false;
+    const wa = av.spec.widget as WidgetType | undefined;
+    const wb = bv.spec.widget as WidgetType | undefined;
+    if (!wa || !wb) {
+      if (wa !== wb) return false;
+    } else if (!wa.eq(wb)) {
+      return false;
+    }
+    ai.next();
+    bi.next();
+  }
+}
+
+/* ---------- 共享遍历工具 ---------- */
+
+type LineCb = (line: { from: number; to: number; text: string }, first: boolean, last: boolean) => void;
+
+/** 遍历节点行区间与可见区交集内的每一行；回调附带是否为节点首/末行 */
+function eachLine(
+  doc: Text,
+  node: SyntaxNodeRef,
+  visible: Span,
+  cb: LineCb,
+): void {
+  const start = Math.max(node.from, visible.from);
+  const end = Math.min(node.to, visible.to);
+  if (start > end) return;
+  // lineAt：这里拿到的是文档位置，不能直接喂给 doc.line（它要的是行号）
+  const firstNo = doc.lineAt(start).number;
+  const lastNo = doc.lineAt(end).number;
+  for (let no = firstNo; no <= lastNo; no++) {
+    const line = doc.line(no);
+    cb(line, line.from <= node.from, line.to >= node.to);
+  }
+}
+
+/** 语法树是否在本次更新中发生了变化（覆盖懒解析在后台补全的场景） */
+function treeChanged(update: ViewUpdate): boolean {
+  return syntaxTree(update.startState) !== syntaxTree(update.state);
+}
+
+/* ---------- 静态组：行类装饰 + 与选区无关的符号淡化 ---------- */
+
+class LiveRenderStatic {
   decorations: DecorationSet = Decoration.none;
 
   constructor(readonly view: EditorView) {
@@ -132,13 +259,158 @@ class LiveRenderPlugin {
   }
 
   update(update: ViewUpdate) {
-    // 语法树引用变化覆盖"懒解析在后台补全"的场景（文档没变但树更完整了）
-    if (
-      update.docChanged ||
-      update.viewportChanged ||
-      update.selectionSet ||
-      syntaxTree(update.startState) !== syntaxTree(update.state)
-    ) {
+    if (update.docChanged || update.viewportChanged || treeChanged(update)) {
+      this.build();
+    }
+  }
+
+  private build() {
+    const view = this.view;
+    const doc = view.state.doc;
+    if (doc.length === 0) {
+      this.decorations = Decoration.none;
+      return;
+    }
+    const tree = syntaxTree(view.state);
+    const lineClasses = new Map<number, Set<string>>();
+    const parts: { from: number; to: number; deco: Decoration }[] = [];
+
+    const addLineClass = (pos: number, cls: string) => {
+      let set = lineClasses.get(pos);
+      if (!set) {
+        set = new Set();
+        lineClasses.set(pos, set);
+      }
+      set.add(cls);
+    };
+
+    const visit = (node: SyntaxNodeRef, visible: Span) => {
+      const name = node.name;
+      if (name.startsWith("ATXHeading")) {
+        const level = Number(name.slice(-1));
+        addLineClass(doc.lineAt(node.from).from, `cm-md-h${level}`);
+        return;
+      }
+      if (name === "SetextHeading1" || name === "SetextHeading2") {
+        const level = name === "SetextHeading1" ? 1 : 2;
+        eachLine(doc, node, visible, (line, _first, last) => {
+          addLineClass(line.from, `cm-md-h${level}`);
+          // 末行的下划线（=== / ---）整行淡化
+          if (last && node.to > node.from + (line.to - line.from)) {
+            parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
+          }
+        });
+        return;
+      }
+      if (name === "Blockquote") {
+        eachLine(doc, node, visible, (line) => {
+          addLineClass(line.from, "cm-md-quote");
+          const m = /^([ \t]*>[ \t]*)+/.exec(line.text);
+          if (m) {
+            parts.push({ from: line.from, to: line.from + m[0].length, deco: mark("cm-md-mark") });
+          }
+        });
+        return;
+      }
+      if (name === "FencedCode") {
+        eachLine(doc, node, visible, (line, first, last) => {
+          addLineClass(line.from, "cm-md-codeblock");
+          // 首末行加圆角标记类（仅多行块；单行块退回普通行样式）
+          if (first && !last) addLineClass(line.from, "cm-md-codeblock-start");
+          if (last && !first) addLineClass(line.from, "cm-md-codeblock-end");
+          if (first) {
+            const m = /^(`{3,}|~{3,})/.exec(line.text);
+            if (m) {
+              parts.push({ from: line.from, to: line.from + m[0].length, deco: mark("cm-md-mark") });
+            }
+          }
+          if (last && !first) {
+            if (/^\s*(`{3,}|~{3,})\s*$/.test(line.text)) {
+              parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
+            }
+          }
+        });
+        return;
+      }
+      if (name === "CodeInfo") {
+        parts.push({ from: node.from, to: node.to, deco: mark("cm-md-mark") });
+        return;
+      }
+      if (name === "TableHeader") {
+        eachLine(doc, node, visible, (line) => addLineClass(line.from, "cm-md-table-head"));
+        return;
+      }
+      if (name === "TableDelimiter") {
+        // 只处理分隔行（| --- |）：父节点为 Table 的才是分隔行，
+        // 单元格内的竖线（父为 TableHeader/TableRow）不淡化整行
+        if (node.node.parent?.name !== "Table") return;
+        eachLine(doc, node, visible, (line) => {
+          addLineClass(line.from, "cm-md-table-delim");
+          parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
+        });
+        return;
+      }
+      if (name === "TableRow") {
+        eachLine(doc, node, visible, (line) => addLineClass(line.from, "cm-md-table-row"));
+        return;
+      }
+      if (name === "ListMark") {
+        parts.push({ from: node.from, to: node.to, deco: mark("cm-md-mark") });
+        return;
+      }
+      if (name === "TaskMarker") {
+        const text = doc.sliceString(node.from, node.to);
+        parts.push({
+          from: node.from,
+          to: node.to,
+          deco: mark(/\[[xX]\]/.test(text) ? "cm-md-task-done" : "cm-md-mark"),
+        });
+        return;
+      }
+      if (name === "URL") {
+        // 显式链接/图片内部的 URL 由父节点统一处理；这里只管裸自动链接
+        const parent = node.node.parent?.name;
+        if (parent !== "Link" && parent !== "Image") {
+          parts.push({ from: node.from, to: node.to, deco: mark("cm-md-link") });
+        }
+        return;
+      }
+    };
+
+    for (const visible of view.visibleRanges) {
+      tree.iterate({
+        from: visible.from,
+        to: visible.to,
+        enter: (node) => visit(node, visible),
+      });
+    }
+
+    if (lineClasses.size === 0 && parts.length === 0) {
+      this.decorations = Decoration.none;
+      return;
+    }
+    const ranges = [];
+    for (const [pos, classes] of lineClasses) {
+      ranges.push(Decoration.line({ class: [...classes].join(" ") }).range(pos));
+    }
+    for (const part of parts) {
+      ranges.push(part.deco.range(part.from, part.to));
+    }
+    this.decorations = Decoration.set(ranges, true);
+  }
+}
+
+/* ---------- 选区组：光标触及即回退源码的符号 + 内联 widget ---------- */
+
+class LiveRenderSel {
+  decorations: DecorationSet = Decoration.none;
+
+  constructor(readonly view: EditorView) {
+    this.build();
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged || update.selectionSet || treeChanged(update)) {
       this.build();
     }
   }
@@ -153,38 +425,9 @@ class LiveRenderPlugin {
     }
     const selection = state.selection;
     const tree = syntaxTree(state);
+    const parts: { from: number; to: number; deco: Decoration }[] = [];
 
-    const lineClasses = new Map<number, Set<string>>();
-    const parts: Part[] = [];
-
-    const addLineClass = (pos: number, cls: string) => {
-      let set = lineClasses.get(pos);
-      if (!set) {
-        set = new Set();
-        lineClasses.set(pos, set);
-      }
-      set.add(cls);
-    };
-
-    const revealed = (from: number, to: number) =>
-      touchesSelection(selection, from, to);
-
-    /** 遍历节点行区间与可见区交集内的每一行；回调附带是否为节点首/末行 */
-    const eachLine = (
-      node: SyntaxNodeRef,
-      visible: Span,
-      cb: (line: { from: number; to: number; text: string }, first: boolean, last: boolean) => void,
-    ) => {
-      const start = Math.max(node.from, visible.from);
-      const end = Math.min(node.to, visible.to);
-      if (start > end) return;
-      const firstNo = doc.lineAt(start).number;
-      const lastNo = doc.lineAt(end).number;
-      for (let no = firstNo; no <= lastNo; no++) {
-        const line = doc.line(no);
-        cb(line, line.from <= node.from, line.to >= node.to);
-      }
-    };
+    const revealed = (from: number, to: number) => touchesSelection(selection, from, to);
 
     /** 行内强调类：隐藏前后定界符 + 内容套样式 */
     const inlineFmt = (
@@ -275,12 +518,10 @@ class LiveRenderPlugin {
       });
     };
 
-    const visit = (node: SyntaxNodeRef, visible: Span) => {
+    const visit = (node: SyntaxNodeRef) => {
       const name = node.name;
-      if (name.startsWith("ATXHeading")) {
-        const level = Number(name.slice(-1));
+      if (name === "ATXHeading") {
         const line = doc.lineAt(node.from);
-        addLineClass(line.from, `cm-md-h${level}`);
         const text = doc.sliceString(node.from, Math.min(node.to, line.to));
         const open = /^#{1,6}[ \t]*/.exec(text);
         const close = /[ \t]+#{1,6}[ \t]*$/.exec(text);
@@ -304,66 +545,6 @@ class LiveRenderPlugin {
         }
         return;
       }
-      if (name === "SetextHeading1" || name === "SetextHeading2") {
-        const level = name === "SetextHeading1" ? 1 : 2;
-        eachLine(node, visible, (line, _first, last) => {
-          addLineClass(line.from, `cm-md-h${level}`);
-          // 末行的下划线（=== / ---）整行淡化
-          if (last && node.to > node.from + (line.to - line.from)) {
-            parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
-          }
-        });
-        return;
-      }
-      if (name === "Blockquote") {
-        eachLine(node, visible, (line) => {
-          addLineClass(line.from, "cm-md-quote");
-          const m = /^([ \t]*>[ \t]*)+/.exec(line.text);
-          if (m) {
-            parts.push({ from: line.from, to: line.from + m[0].length, deco: mark("cm-md-mark") });
-          }
-        });
-        return;
-      }
-      if (name === "FencedCode") {
-        eachLine(node, visible, (line, first, last) => {
-          addLineClass(line.from, "cm-md-codeblock");
-          // 首末行加圆角标记类（仅多行块；单行块退回普通行样式）
-          if (first && !last) addLineClass(line.from, "cm-md-codeblock-start");
-          if (last && !first) addLineClass(line.from, "cm-md-codeblock-end");
-          if (first) {
-            const m = /^(`{3,}|~{3,})/.exec(line.text);
-            if (m) {
-              parts.push({ from: line.from, to: line.from + m[0].length, deco: mark("cm-md-mark") });
-            }
-          }
-          if (last && !first) {
-            if (/^\s*(`{3,}|~{3,})\s*$/.test(line.text)) {
-              parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
-            }
-          }
-        });
-        return;
-      }
-      if (name === "CodeInfo") {
-        parts.push({ from: node.from, to: node.to, deco: mark("cm-md-mark") });
-        return;
-      }
-      if (name === "TableHeader") {
-        eachLine(node, visible, (line) => addLineClass(line.from, "cm-md-table-head"));
-        return;
-      }
-      if (name === "TableDelimiter") {
-        eachLine(node, visible, (line) => {
-          addLineClass(line.from, "cm-md-table-delim");
-          parts.push({ from: line.from, to: line.to, deco: mark("cm-md-mark") });
-        });
-        return;
-      }
-      if (name === "TableRow") {
-        eachLine(node, visible, (line) => addLineClass(line.from, "cm-md-table-row"));
-        return;
-      }
       if (name === "HorizontalRule") {
         if (revealed(node.from, node.to)) {
           parts.push({ from: node.from, to: node.to, deco: mark("cm-md-mark") });
@@ -374,19 +555,6 @@ class LiveRenderPlugin {
             deco: Decoration.replace({ widget: new HrWidget() }),
           });
         }
-        return;
-      }
-      if (name === "ListMark") {
-        parts.push({ from: node.from, to: node.to, deco: mark("cm-md-mark") });
-        return;
-      }
-      if (name === "TaskMarker") {
-        const text = doc.sliceString(node.from, node.to);
-        parts.push({
-          from: node.from,
-          to: node.to,
-          deco: mark(/\[[xX]\]/.test(text) ? "cm-md-task-done" : "cm-md-mark"),
-        });
         return;
       }
       if (name === "StrongEmphasis") {
@@ -437,44 +605,117 @@ class LiveRenderPlugin {
         renderImage(node);
         return;
       }
-      if (name === "URL") {
-        // 显式链接/图片内部的 URL 由父节点统一处理；这里只管裸自动链接
-        const parent = node.node.parent?.name;
-        if (parent !== "Link" && parent !== "Image") {
-          parts.push({ from: node.from, to: node.to, deco: mark("cm-md-link") });
-        }
-        return;
-      }
     };
 
     for (const visible of view.visibleRanges) {
       tree.iterate({
         from: visible.from,
         to: visible.to,
-        enter: (node) => visit(node, visible),
+        enter: visit,
       });
     }
 
-    if (lineClasses.size === 0 && parts.length === 0) {
+    if (parts.length === 0) {
       this.decorations = Decoration.none;
       return;
     }
-    const ranges = [];
-    for (const [pos, classes] of lineClasses) {
-      ranges.push(Decoration.line({ class: [...classes].join(" ") }).range(pos));
-    }
-    for (const part of parts) {
-      ranges.push(part.deco.range(part.from, part.to));
-    }
-    this.decorations = Decoration.set(ranges, true);
+    this.decorations = Decoration.set(
+      parts.map((p) => p.deco.range(p.from, p.to)),
+      true,
+    );
   }
 }
 
-/** 即时渲染扩展：装饰 + 原子区间（隐藏符号/图片/水平线不可点击进内部） */
-export const liveRenderExtension: Extension = ViewPlugin.fromClass(LiveRenderPlugin, {
-  decorations: (plugin) => plugin.decorations,
-  provide: (plugin) =>
-    EditorView.atomicRanges.of(
-      (view) => view.plugin(plugin)?.decorations ?? Decoration.none,
-    ),
-});
+/* ---------- 表格块装饰插件：算视口内的表格，经 effect 写回字段 ---------- */
+
+class LiveRenderTables {
+  private scheduled = false;
+  private destroyed = false;
+
+  constructor(readonly view: EditorView) {
+    this.schedule();
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged || update.selectionSet || treeChanged(update)) {
+      this.schedule();
+    }
+  }
+
+  destroy() {
+    this.destroyed = true;
+  }
+
+  /** 派发事务要等本次更新结束后再做（update 过程中再 dispatch 会抛错），
+   *  用微任务：同一帧内完成，不会出现"先源码后表格"的闪烁。 */
+  private schedule() {
+    if (this.scheduled || this.destroyed) return;
+    this.scheduled = true;
+    queueMicrotask(() => {
+      this.scheduled = false;
+      if (this.destroyed) return;
+      const next = this.build();
+      const current = this.view.state.field(tableDecoField, false) ?? Decoration.none;
+      if (sameTableDecos(next, current)) return;
+      this.view.dispatch({ effects: setTableDecos.of(next) });
+    });
+  }
+
+  private build(): DecorationSet {
+    const view = this.view;
+    const doc = view.state.doc;
+    if (doc.length === 0) return Decoration.none;
+    const selection = view.state.selection;
+    const tree = syntaxTree(view.state);
+    const ranges: Range<Decoration>[] = [];
+
+    // 只装饰"当前会被渲染"的视口范围：块 widget 一旦进入视口就会被测量，
+    // 高度表用的是真实高度；若把装饰放到视口之外，那些 widget 只能用估算高度，
+    // 滚动到它们时会跳位。块装饰不会改变自身起始位置，所以按视口增删不会抖动。
+    for (const visible of view.visibleRanges) {
+      tree.iterate({
+        from: visible.from,
+        to: visible.to,
+        enter: (node) => {
+          if (node.name !== "Table") return;
+          const span = tableBlockRange(doc, node);
+          if (!span) return;
+          // 选区触及表格（含边界）时回退源码，单元格内的行内语法交给选区组装饰
+          if (touchesSelection(selection, span.from, span.to)) return;
+          ranges.push(
+            Decoration.replace({
+              widget: new TableWidget(doc.sliceString(span.from, span.to), getRenderBaseDir()),
+              block: true,
+            }).range(span.from, span.to),
+          );
+        },
+      });
+    }
+
+    return ranges.length ? Decoration.set(ranges, true) : Decoration.none;
+  }
+}
+
+/** 即时渲染扩展：静态/选区两组插件装饰 + 表格块装饰字段 + 原子区间
+ *  （隐藏符号/图片/水平线与符号淡化标记均不可点击进内部） */
+export const liveRenderExtension: Extension = [
+  tableDecoField,
+  ViewPlugin.fromClass(LiveRenderStatic, {
+    decorations: (plugin) => plugin.decorations,
+    provide: (plugin) =>
+      EditorView.atomicRanges.of(
+        (view) => view.plugin(plugin)?.decorations ?? Decoration.none,
+      ),
+  }),
+  ViewPlugin.fromClass(LiveRenderSel, {
+    decorations: (plugin) => plugin.decorations,
+    provide: (plugin) =>
+      EditorView.atomicRanges.of(
+        (view) => view.plugin(plugin)?.decorations ?? Decoration.none,
+      ),
+  }),
+  ViewPlugin.fromClass(LiveRenderTables),
+  EditorView.atomicRanges.of(
+    (view) => view.state.field(tableDecoField, false) ?? Decoration.none,
+  ),
+];

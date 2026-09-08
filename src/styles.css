@@ -3728,6 +3728,16 @@ body.sidebar-auto-hidden #editor-header {
   color: var(--text-faint);
 }
 
+/* 表格（渲染形态）：光标离开时的即时渲染 widget，复用 .markdown-body 表格样式，
+   字号/行高跟随编辑器而非预览的固定 15px */
+#editor .cm-editor .cm-md-table-rendered {
+  font-size: inherit;
+  line-height: inherit;
+}
+#editor .cm-editor .cm-md-table-rendered table {
+  margin-bottom: 0.4em;
+}
+
 /* 行内样式 */
 #editor .cm-editor .cm-md-strong {
   font-weight: 700;

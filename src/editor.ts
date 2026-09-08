@@ -39,7 +39,7 @@ import {
   undo as cmUndo,
 } from "@codemirror/commands";
 import { bracketMatching, indentUnit } from "@codemirror/language";
-import { insertNewlineContinueMarkup, markdown } from "@codemirror/lang-markdown";
+import { insertNewlineContinueMarkup, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { liveRenderExtension } from "./liveRender";
 import { closeFindPanel, findReplaceExtension } from "./findReplace";
 import {
@@ -195,7 +195,8 @@ function getExtensions(): Extension[] {
     EditorView.lineWrapping,
     bracketMatching(),
     indentUnit.of("  "),
-    markdown(),
+    // base 默认是纯 CommonMark（无表格/删除线/任务列表节点），换 GFM 版让即时渲染能识别
+    markdown({ base: markdownLanguage }),
     liveRenderCompartment.of(liveRenderEnabled ? liveRenderExtension : []),
     placeholderCompartment.of(placeholder(t("editor.placeholder") || "开始输入…")),
     EditorState.readOnly.of(false),

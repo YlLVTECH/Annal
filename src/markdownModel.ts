@@ -409,8 +409,9 @@ export function applyEdit(
     lastAffected++;
   }
 
-  // 快速路径：单块 & 未触及结构化行 & 类型可安全增量 & 单块重解析结果一致。
+  // 快速路径：单块 & 未触及结构化行 & 类型可安全增量。
   // 前提是本次编辑没有插入/删除换行（行号新旧坐标一致）。
+  // 段落块无需 re-lex（类型不可能变化）；其余 simple 类型用 re-lex 校验类型一致。
   if (first === lastAffected && opts?.newlineChange !== true) {
     const b = blocks[first];
     let structural = false;
@@ -425,6 +426,16 @@ export function applyEdit(
       // 按旧行号切出该块的新内容；同行为准，去掉行尾换行以便与 marked 的 raw 对齐
       let slice = doc.sliceString(lineStartOffset(doc, b.startLine), lineStartOffset(doc, b.endLine + 1));
       if (slice.endsWith("\n")) slice = slice.slice(0, -1);
+      // 段落块快速路径：无换行 + 无结构化行的编辑不可能改变段落块的类型
+      // （列表/标题/围栏/表格/引用等转换必然产生结构化行，已被上面的检查拦截），
+      // 整块 re-lex 校验是纯冗余——大段落下每键都是 O(块大小) 的浪费。
+      // 其它 simple 类型（heading/hr/code/table/html）删除标记符可产生非结构化行
+      // 却改变块类型，且块本身短，保留 re-lex 校验。
+      if (b.type === "paragraph") {
+        updateParagraphBlock(b, slice);
+        changed.add(b.id);
+        return changed;
+      }
       let single: Token | null = null;
       try {
         const res = lexSnippet(slice, docLinks);
@@ -611,6 +622,17 @@ function updateSingleBlock(b: MdBlock, newRaw: string) {
   b._token = undefined;
 }
 
+/** 段落块快速路径：编辑不含换行，行数不变、类型不变，只刷新切片与内容指纹。
+ *  不做整块 re-lex、不逐键扫图片正则、不重算行数（旧路径里这几项都是 O(块大小)）。 */
+function updateParagraphBlock(b: MdBlock, newRaw: string) {
+  b.raw = newRaw;
+  b.key = hashText(newRaw);
+  b.version++;
+  b.html = "";
+  b.hlDone = false;
+  b._token = undefined;
+}
+
 /* ---------- 块渲染 ---------- */
 
 /** 渲染并缓存单个块的消毒 HTML（代码块先给转义文本，挂载时再升级高亮） */
@@ -703,6 +725,15 @@ export function renderMarkdownWhole(src: string, baseDir = ""): string {
     return out.join("\n");
   } finally {
     renderBaseDir = saved;
+  }
+}
+
+/** 片段渲染 + 消毒（编辑器即时渲染的表格 widget 等以 innerHTML 挂载的场景） */
+export function renderSnippetHtml(src: string, baseDir = ""): string {
+  try {
+    return sanitize(renderMarkdownWhole(src, baseDir));
+  } catch {
+    return sanitize(`<p>${escapeHtml(src)}</p>`);
   }
 }
 

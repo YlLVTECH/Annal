@@ -1,0 +1,38 @@
+{
+  "arch": "live-render-opt123",
+  "meta": {
+    "time": "2026-09-06T02:00:32.058Z",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCode/3.11.2 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+    "viewport": "1440x900",
+    "dpr": 1,
+    "liveRender": true,
+    "docMedium": "12035B / 599 行",
+    "docLarge": "67046B / 3120 行",
+    "docPlain": "42877B / 1200 行"
+  },
+  "scenarios": {
+    "calib_cpu": { "n": 30, "unit": "ms", "mean": 9.453, "median": 5.5, "p95": 42.6, "min": 5.1, "max": 46.2 },
+    "micro_lezer_medium": { "n": 60, "unit": "ms", "mean": 1.905, "median": 1.7, "p95": 3.3, "min": 0.8, "max": 6.5 },
+    "micro_lezer_bigpara": { "n": 60, "unit": "ms", "mean": 14.382, "median": 12.8, "p95": 28, "min": 10.5, "max": 41.2 },
+    "init_cold": { "n": 1, "unit": "ms", "mean": 8.6, "median": 8.6, "p95": 8.6, "min": 8.6, "max": 8.6 },
+    "openDoc_medium": { "n": 12, "unit": "ms", "mean": 21.167, "median": 20.9, "p95": 23.5, "min": 15.4, "max": 27.7 },
+    "openDoc_large": { "n": 6, "unit": "ms", "mean": 35, "median": 33.4, "p95": 34.2, "min": 28.5, "max": 49 },
+    "openDoc_bigpara": { "n": 6, "unit": "ms", "mean": 33.083, "median": 31.4, "p95": 36, "min": 29.1, "max": 36.7 },
+    "type_medium": { "n": 60, "unit": "ms", "mean": 7.068, "median": 6.6, "p95": 10.9, "min": 3.7, "max": 20.2 },
+    "type_medium_dom": { "n": 60, "unit": "ms", "mean": 7.643, "median": 6.6, "p95": 11.7, "min": 3.8, "max": 27 },
+    "type_large": { "n": 60, "unit": "ms", "mean": 23.063, "median": 19.8, "p95": 38.9, "min": 13.5, "max": 40.4 },
+    "type_bigpara": { "n": 60, "unit": "ms", "mean": 16.19, "median": 14.2, "p95": 30.7, "min": 11.8, "max": 35.1 },
+    "type_bigpara_nolive": { "n": 60, "unit": "ms", "mean": 16.647, "median": 14.6, "p95": 30.2, "min": 12.9, "max": 43 },
+    "bigpara_key_total": { "n": 40, "unit": "ms", "mean": 15.39, "median": 13.9, "p95": 23.9, "min": 11.7, "max": 37 },
+    "bigpara_applyedit_only": { "n": 40, "unit": "ms", "mean": 0.713, "median": 0.6, "p95": 1.2, "min": 0.5, "max": 1.8 },
+    "medium_key_total": { "n": 40, "unit": "ms", "mean": 7.715, "median": 6.5, "p95": 11.8, "min": 4.4, "max": 22.3 },
+    "medium_applyedit_only": { "n": 40, "unit": "ms", "mean": 1.285, "median": 0.1, "p95": 3.3, "min": 0, "max": 4 },
+    "type_medium_nolive": { "n": 60, "unit": "ms", "mean": 4.9, "median": 4.4, "p95": 7.7, "min": 3, "max": 9.3 },
+    "cursor_large": { "n": 60, "unit": "ms", "mean": 0.572, "median": 0.4, "p95": 1.5, "min": 0.2, "max": 2.5 },
+    "cursor_large_nolive": { "n": 60, "unit": "ms", "mean": 0.663, "median": 0.5, "p95": 1.4, "min": 0.3, "max": 2.9 },
+    "scroll_large": { "n": 20, "unit": "ms", "mean": 16.275, "median": 10.6, "p95": 27.3, "min": 5.6, "max": 57.7 },
+    "scroll_large_nolive": { "n": 20, "unit": "ms", "mean": 11.835, "median": 10, "p95": 21.5, "min": 7, "max": 34.5 },
+    "paste_large": { "n": 5, "unit": "ms", "mean": 33.04, "median": 33.2, "p95": 35.3, "min": 26.7, "max": 40.1 },
+    "list_update_20": { "n": 1, "unit": "ms", "mean": 3.1, "median": 3.1, "p95": 3.1, "min": 3.1, "max": 3.1 }
+  }
+}

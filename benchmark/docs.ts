@@ -146,6 +146,20 @@ export function findParagraphLine(content: string, frac: number): number {
   return 0;
 }
 
+/** 生成单一巨型段落文档：连续普通文本行、无空行、无结构化行首，
+ *  marked 会把整篇解析为单个段落块 —— 块模型"整块重解析"的最坏情形。
+ *  每行可带少量 ASCII 词（不放在行首），让字数统计路径也参与工作。 */
+export function genPlainDoc(seed: number, lines: number): string {
+  const rnd = mulberry32(seed);
+  const out: string[] = [];
+  for (let i = 0; i < lines; i++) {
+    const tail =
+      rnd() < 0.3 ? ` 代码${Math.floor(rnd() * 9000) + 1000} 与 数据${i}` : "";
+    out.push(sentence(rnd, 10, 20) + tail);
+  }
+  return out.join("\n");
+}
+
 /** 侧栏基准用的假笔记元信息 */
 export interface FakeNote {
   id: string;

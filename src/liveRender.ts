@@ -520,7 +520,7 @@ class LiveRenderSel {
 
     const visit = (node: SyntaxNodeRef) => {
       const name = node.name;
-      if (name === "ATXHeading") {
+      if (name.startsWith("ATXHeading")) {
         const line = doc.lineAt(node.from);
         const text = doc.sliceString(node.from, Math.min(node.to, line.to));
         const open = /^#{1,6}[ \t]*/.exec(text);

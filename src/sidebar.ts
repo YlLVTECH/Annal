@@ -303,7 +303,7 @@ export function renderList() {
       if (n.pinned) {
         const pin = document.createElement("span");
         pin.className = "pin-icon";
-        pin.textContent = "📌";
+        pin.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 3l1 1-1.5 4.5L18 11l-4 4-2.5-2.5L7 17H5v-2l4.5-4.5L7 8l2.5-2.5 2.5 2.5L16.5 6 16 3z"/></svg>`;
         pin.title = t("contextMenu.pin");
         title.appendChild(pin);
         title.appendChild(document.createTextNode(" "));

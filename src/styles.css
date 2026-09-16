@@ -50,7 +50,7 @@
   --shadow-btn: none;
 
   /* 布局尺寸与圆角 */
-  --titlebar-h: 36px;
+  --titlebar-h: 38px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -116,6 +116,7 @@ html[data-theme="dark"] {
 
   --ring: rgba(123, 163, 255, 0.35);
   --shadow-overlay: 0 2px 16px rgba(0, 0, 0, 0.4);
+  --shadow-btn: none;
 
   /* 代码高亮（GitHub dark） */
   --hl-text: #c9d1d9;
@@ -220,6 +221,8 @@ body {
 
 button {
   font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #app {
@@ -296,34 +299,29 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   padding-left: 14px;
 }
 
-.titlebar-logo {
-  width: 15px;
-  height: 15px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  pointer-events: none;
-}
-
 .titlebar-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  color: var(--text);
   white-space: nowrap;
   pointer-events: none;
 }
 
-/* 顶部动作区：打开文件 / 收起侧栏 / 主题（仿 VSCode 工具栏按钮） */
+/* 顶部动作区：打开文件 / 收起侧栏 / 主题 / 设置 / 新建笔记 */
 .titlebar-actions {
   display: flex;
   align-items: center;
+  gap: 4px;
+  padding: 0 8px;
   height: 100%;
 }
 
 .titlebar-btn {
-  width: 36px;
-  height: 100%;
+  width: 30px;
+  height: 30px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   display: inline-flex;
@@ -342,6 +340,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 .titlebar-icon {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 
 .titlebar-btn:hover {
@@ -361,7 +360,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 }
 
 .win-btn {
-  width: 46px;
+  width: 44px;
   height: 100%;
   border: none;
   background: transparent;
@@ -458,13 +457,6 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   display: none !important;
 }
 
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px 6px;
-}
-
 .batch-bar {
   display: flex;
   align-items: center;
@@ -524,8 +516,8 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 }
 
 .batch-btn-danger:hover {
-  background: var(--danger-soft, rgba(220, 38, 38, 0.07));
-  color: var(--danger-hover, var(--danger));
+  background: var(--danger-soft);
+  color: var(--danger-hover);
 }
 
 .batch-btn-secondary:hover {
@@ -537,42 +529,6 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.icon-btn {
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-.icon-btn svg {
-  width: 15px;
-  height: 15px;
-}
-
-.icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-#new-note-btn {
-  font-size: 15px;
-  line-height: 1;
-  font-weight: 500;
 }
 
 .sidebar-search {
@@ -635,7 +591,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 
 /* 列表分组标题（外部文件 / 笔记） */
 .list-group-header {
-  padding: 14px 12px 5px;
+  padding: 12px 10px 4px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -698,11 +654,29 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
 }
 
 .note-item.active .note-title {
   color: var(--text);
   font-weight: 600;
+}
+
+.pin-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.pin-icon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 
 .note-time {
@@ -712,6 +686,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 文件已被外部删除的列表项 */
@@ -735,6 +710,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   color: var(--text-muted);
   font-size: 13px;
   gap: 5px;
+  padding: 24px 16px;
 }
 
 /* 提示文字可能换行：多行时也保持水平居中 */
@@ -800,6 +776,7 @@ html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   color: var(--text-muted);
   min-width: 64px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .page-size {
@@ -910,23 +887,40 @@ body.sidebar-auto-hidden #editor-header {
 #editor-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 52px;
+  justify-content: space-between;
+  gap: 16px;
+  height: 54px;
   padding: 0 20px;
   border-bottom: 1px solid var(--border-soft);
   transition: border-color 0.18s ease;
 }
 
+.editor-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
 #editor-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.editor-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 #saved-status {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -952,8 +946,8 @@ body.sidebar-auto-hidden #editor-header {
 /* 保存状态前的状态点：按 data-status 区分颜色与动效 */
 #saved-status:not(:empty)::before {
   content: "";
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--text-faint);
   opacity: 0.6;
@@ -999,33 +993,26 @@ body.sidebar-auto-hidden #editor-header {
   }
 }
 
-/* 删除：弱化为幽灵按钮，悬停才显危险色 */
-#delete-note-btn {
+/* 编辑器头部动作按钮群 */
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-btn {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-faint);
   padding: 5px 12px;
   font-size: 12.5px;
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-#delete-note-btn:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
 }
 
 /* 提交新版本：幽灵按钮，悬停显强调色 */
 #commit-note-btn {
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-faint);
-  padding: 5px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 #commit-note-btn:hover {
@@ -1033,21 +1020,24 @@ body.sidebar-auto-hidden #editor-header {
   color: var(--accent);
 }
 
-/* 另存为笔记：与"提交"同款幽灵按钮，悬停显强调色（仅外部文件模式可见） */
+/* 另存为笔记：与"提交"同款幽灵按钮（仅外部文件模式可见） */
 #save-as-note-btn {
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-faint);
-  padding: 5px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 #save-as-note-btn:hover {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* 删除：弱化为幽灵按钮，悬停才显危险色 */
+#delete-note-btn {
+  color: var(--text-faint);
+}
+
+#delete-note-btn:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 /* 外部文件模式：按钮变为"关闭"，使用中性配色 */
@@ -1061,11 +1051,10 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 /* ---------- 工具栏 ---------- */
-/* 恒定单行：排版按钮区放不下时内部横向滚动（右缘淡出提示），视图切换固定在右侧 */
+/* 恒定单行：排版按钮区放不下时内部横向滚动（右缘淡出提示） */
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 4px 2px;
   min-height: 42px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border-soft);
@@ -1802,11 +1791,9 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 .markdown-body table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
-  margin: 0.8em 0;
   border-collapse: collapse;
+  margin: 0.8em 0;
+  max-width: 100%;
 }
 
 .markdown-body th,
@@ -2228,7 +2215,7 @@ body.sidebar-auto-hidden #editor-header {
   justify-content: center;
   /* 高于设置/历史等兄弟弹层：确认框可能从它们内部触发 */
   z-index: 120;
-  animation: overlay-in 0.14s ease;
+  animation: overlay-in 0.16s ease;
 }
 
 @keyframes overlay-in {
@@ -2244,8 +2231,8 @@ body.sidebar-auto-hidden #editor-header {
   background: var(--bg-pane);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  padding: 24px 22px 18px;
-  width: 340px;
+  padding: 24px 22px 20px;
+  width: 350px;
   max-width: calc(100vw - 32px);
   box-shadow: var(--shadow-overlay);
   transition: background-color 0.18s ease, border-color 0.18s ease;
@@ -2264,15 +2251,16 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 .confirm-icon {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   color: var(--danger);
   margin-bottom: 12px;
 }
 
 .confirm-title {
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
+  color: var(--text);
 }
 
 .confirm-text {
@@ -2286,10 +2274,12 @@ body.sidebar-auto-hidden #editor-header {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
-.confirm-actions button {
+.btn-secondary,
+.btn-primary,
+.btn-danger {
   border: none;
   border-radius: var(--radius-sm);
   padding: 7px 16px;
@@ -2305,6 +2295,15 @@ body.sidebar-auto-hidden #editor-header {
 
 .btn-secondary:hover {
   background: var(--border-soft);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
 }
 
 .btn-danger {
@@ -2327,7 +2326,7 @@ body.sidebar-auto-hidden #editor-header {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  animation: overlay-in 0.14s ease;
+  animation: overlay-in 0.16s ease;
 }
 
 .history-box {
@@ -2639,7 +2638,7 @@ body.sidebar-auto-hidden #editor-header {
 .history-view-content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: auto;
   padding: 14px 0 18px;
 }
 
@@ -2661,15 +2660,15 @@ body.sidebar-auto-hidden #editor-header {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  animation: overlay-in 0.14s ease;
+  animation: overlay-in 0.16s ease;
 }
 
 .commit-box {
   background: var(--bg-pane);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  padding: 22px 22px 18px;
-  width: 400px;
+  padding: 24px 22px 20px;
+  width: 390px;
   max-width: calc(100vw - 32px);
   box-shadow: var(--shadow-overlay);
   transition: background-color 0.18s ease, border-color 0.18s ease;
@@ -2677,8 +2676,9 @@ body.sidebar-auto-hidden #editor-header {
 }
 
 .commit-title {
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
+  color: var(--text);
 }
 
 .commit-text {
@@ -2715,25 +2715,7 @@ body.sidebar-auto-hidden #editor-header {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 16px;
-}
-
-.commit-actions button {
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 7px 16px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-.btn-primary:hover {
-  background: var(--accent-hover);
+  margin-top: 20px;
 }
 
 /* ============ 设置弹层 ============ */
@@ -2747,7 +2729,7 @@ body.sidebar-auto-hidden #editor-header {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  animation: overlay-in 0.14s ease;
+  animation: overlay-in 0.16s ease;
 }
 
 .settings-box {
@@ -2816,7 +2798,7 @@ body.sidebar-auto-hidden #editor-header {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   padding: 8px 10px;
   border-right: 1px solid var(--border-soft);
   overflow-y: auto;
@@ -3301,35 +3283,6 @@ body.sidebar-auto-hidden #editor-header {
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* 设置按钮 */
-#settings-toggle {
-  width: 36px;
-  height: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-#settings-toggle svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-}
-
-#settings-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-#settings-toggle:active {
-  background: var(--bg-active);
-}
-
 /* ============ 响应式适配 ============ */
 
 /* 中等宽度：收紧头部留白 */
@@ -3380,37 +3333,27 @@ body.sidebar-auto-hidden #editor-header {
 
 /* 窄窗口：进一步压缩头部、工具栏与弹层 */
 @media (max-width: 720px) {
-  /* 编辑器头部：允许换行，避免溢出 */
+  /* 编辑器头部：自适应多行，保证按钮与标题不挤压 */
   #editor-header {
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: 8px;
     padding: 8px 12px;
     height: auto;
   }
 
-  #editor-title {
-    order: 1;
-    flex: 1 1 auto;
-    min-width: 140px;
-  }
-
-  #editor-missing {
-    order: 2;
-  }
-
-  #saved-status {
-    order: 3;
+  .editor-header-left {
     width: 100%;
-    margin-left: 0;
+    min-width: 0;
   }
 
-  #commit-note-btn,
-  #delete-note-btn,
-  #save-as-note-btn {
-    order: 4;
-    flex: 1 1 auto;
-    min-width: 0;
-    justify-content: center;
+  .editor-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .editor-actions {
+    display: flex;
+    gap: 4px;
   }
 
   /* 工具栏：更紧凑，排版按钮区空间不足时换行 */
@@ -3452,7 +3395,8 @@ body.sidebar-auto-hidden #editor-header {
 /* 极窄窗口：继续收紧标题栏与内容区 */
 @media (max-width: 480px) {
   .titlebar-btn {
-    width: 30px;
+    width: 28px;
+    height: 28px;
   }
 
   .titlebar-btn svg {
@@ -3478,9 +3422,7 @@ body.sidebar-auto-hidden #editor-header {
     font-size: 14px;
   }
 
-  #commit-note-btn,
-  #delete-note-btn,
-  #save-as-note-btn {
+  .header-btn {
     font-size: 12px;
     padding: 4px 8px;
   }
@@ -3733,6 +3675,8 @@ body.sidebar-auto-hidden #editor-header {
 #editor .cm-editor .cm-md-table-rendered {
   font-size: inherit;
   line-height: inherit;
+  max-width: 100%;
+  overflow-x: auto;
 }
 #editor .cm-editor .cm-md-table-rendered table {
   margin-bottom: 0.4em;

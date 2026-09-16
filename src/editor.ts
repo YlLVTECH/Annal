@@ -664,7 +664,10 @@ export function runCommand(cmd: string, onTableToggle?: () => void) {
   }
 }
 
-/* ---------- 粘贴处理（URL 转链接 + 图片落盘插入） ---------- */
+/* ---------- 粘贴处理（URL 转链接 + 图片落盘插入 + 长文本分块防卡死） ---------- */
+
+/** 长粘贴分块行数上限；超过时拆成多段 dispatch，段间让出微任务让浏览器刷新 */
+const PASTE_CHUNK_LINES = 100;
 
 function handlePaste(e: ClipboardEvent, v: EditorView): boolean {
   if (!canEditCurrent() || e.clipboardData == null) return false;
@@ -692,7 +695,62 @@ function handlePaste(e: ClipboardEvent, v: EditorView): boolean {
     void handlePasteImage(e, v);
     return true;
   }
+  // 普通文本粘贴：超长内容按行分块逐段 dispatch，段间让出微任务避免主线程阻塞
+  const rawText = e.clipboardData.getData("text");
+  if (rawText) {
+    e.preventDefault();
+    const chunks = splitPasteChunks(rawText);
+    if (chunks.length === 1) {
+      v.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: chunks[0] },
+        selection: { anchor: sel.from + chunks[0].length },
+        scrollIntoView: true,
+      });
+    } else {
+      void dispatchPasteChunks(v, sel.from, sel.to, chunks);
+    }
+    return true;
+  }
   return false;
+}
+
+/** 将粘贴文本拆分为不超过 PASTE_CHUNK_LINES 行的块，尽量在空行边界断开 */
+function splitPasteChunks(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines.length <= PASTE_CHUNK_LINES) return [text];
+  const chunks: string[] = [];
+  let chunkStart = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const chunkLines = i - chunkStart + 1;
+    if (chunkLines >= PASTE_CHUNK_LINES && (lines[i].trim() === "" || i === lines.length - 1)) {
+      chunks.push(lines.slice(chunkStart, i + 1).join("\n"));
+      chunkStart = i + 1;
+    }
+  }
+  if (chunkStart < lines.length) chunks.push(lines.slice(chunkStart).join("\n"));
+  return chunks;
+}
+
+/** 逐段 dispatch 粘贴块，段间让出微任务让浏览器刷新界面 */
+async function dispatchPasteChunks(v: EditorView, from: number, to: number, chunks: string[]) {
+  let posFrom = from;
+  let posTo = to;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const newFrom = posFrom;
+    const newTo = posTo;
+    const newEnd = posTo + chunk.length;
+    v.dispatch({
+      changes: { from: newFrom, to: newTo, insert: chunk },
+      selection: { anchor: newFrom + chunk.length },
+      scrollIntoView: true,
+    });
+    posTo = newEnd;
+    if (i < chunks.length - 1) {
+      // 让出微任务，允许浏览器在下一段 dispatch 前 repaint
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
 }
 
 async function handlePasteImage(e: ClipboardEvent, v: EditorView) {
